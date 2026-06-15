@@ -34,3 +34,21 @@ export interface HomeSnapshot {
   drive: DriveVerdict;
   bayous: BayouReading[];
 }
+
+// A single flood gauge with location, for plotting on the map.
+export interface GaugePoint {
+  id: number;
+  lat: number;
+  lng: number;
+  current: number;        // current level ft
+  flood: number;          // flood-stage ft
+  buffer: number;         // ft until flood (flood - current)
+  tier: Tier;
+}
+
+// Everything the map view needs: the snapshot, the searched location, all gauges.
+export interface FloodView {
+  snapshot: HomeSnapshot;
+  center: { lat: number; lng: number } | null;
+  gauges: GaugePoint[];
+}

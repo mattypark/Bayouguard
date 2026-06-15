@@ -7,7 +7,7 @@ const STORAGE_KEY = 'bayouguard_saved_address';
 export default function AddressSearch({
   onSearch,
 }: {
-  onSearch?: (addr: string) => void;
+  onSearch?: (addr: string, submitted: boolean) => void;
 }) {
   const [value, setValue] = useState('');
   const [saved, setSaved] = useState<string | null>(null);
@@ -17,7 +17,7 @@ export default function AddressSearch({
     if (v) {
       setValue(v);
       setSaved(v);
-      onSearch?.(v);
+      onSearch?.(v, false); // restore: refresh status only, don't open the map
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -29,7 +29,7 @@ export default function AddressSearch({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (value) onSearch?.(value);
+    if (value) onSearch?.(value, true); // explicit search: open the map
   };
 
   return (

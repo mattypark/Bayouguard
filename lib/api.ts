@@ -10,6 +10,8 @@ import type {
   Tier,
   BayouReading,
   DriveVerdict,
+  GaugePoint,
+  FloodView,
 } from './types';
 import { geocode } from './geocode';
 import { getWeather } from './weather';
@@ -149,13 +151,29 @@ async function fetchGauges(): Promise<BackendGauge[]> {
   }
 }
 
-export async function getHomeSnapshot(address?: string): Promise<HomeSnapshot> {
-  if (!BASE) return MOCK;
+function toGaugePoints(gauges: BackendGauge[]): GaugePoint[] {
+  return gauges.map((g) => ({
+    id: g.id,
+    lat: g.latitude,
+    lng: g.longitude,
+    current: g.current_level_ft,
+    flood: g.flood_level_ft,
+    buffer: g.buffer_ft,
+    tier: normalizeTier(g.risk_tier),
+  }));
+}
+
+const MOCK_VIEW: FloodView = { snapshot: MOCK, center: null, gauges: [] };
+
+/* Full assembly: geocode -> /risk + /gauges + weather -> snapshot + map data.
+ * Both the SSR snapshot and the interactive map are built from this. */
+export async function getFloodView(address?: string): Promise<FloodView> {
+  if (!BASE) return MOCK_VIEW;
 
   const query = address ?? DEFAULT_ADDRESS;
 
   const geo = await geocode(query);
-  if (!geo) return MOCK; // unresolvable address -> keep UI populated
+  if (!geo) return MOCK_VIEW; // unresolvable address -> keep UI populated
 
   const [risk, gauges, weather] = await Promise.all([
     fetchRisk(geo.label ?? query, geo.lat, geo.lng),
@@ -163,12 +181,12 @@ export async function getHomeSnapshot(address?: string): Promise<HomeSnapshot> {
     getWeather(geo.lat, geo.lng),
   ]);
 
-  if (!risk) return MOCK;
+  if (!risk) return { ...MOCK_VIEW, center: { lat: geo.lat, lng: geo.lng } };
 
   const tier = normalizeTier(risk.risk_tier);
   const bayous = gauges.length ? nearestBayous(gauges, geo.lat, geo.lng) : MOCK.bayous;
 
-  return {
+  const snapshot: HomeSnapshot = {
     risk: {
       address: geo.label ?? risk.address,
       zip: zipFromAddress(geo.label ?? query),
@@ -181,4 +199,14 @@ export async function getHomeSnapshot(address?: string): Promise<HomeSnapshot> {
     drive: driveFromTier(tier),
     bayous,
   };
+
+  return {
+    snapshot,
+    center: { lat: geo.lat, lng: geo.lng },
+    gauges: toGaugePoints(gauges),
+  };
+}
+
+export async function getHomeSnapshot(address?: string): Promise<HomeSnapshot> {
+  return (await getFloodView(address)).snapshot;
 }
