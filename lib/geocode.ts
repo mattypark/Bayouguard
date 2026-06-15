@@ -8,6 +8,63 @@ export interface GeoPoint {
   label?: string; // normalized/matched address
 }
 
+export interface Suggestion {
+  label: string;
+  lat: number;
+  lng: number;
+}
+
+// Houston bias for type-ahead ranking.
+const HOUSTON = { lat: 29.7604, lng: -95.3698 };
+// Greater Houston / SE Texas bounding box (minLon, minLat, maxLon, maxLat).
+// Constrains suggestions to the service area so out-of-region hits drop out.
+const HOUSTON_BBOX = '-96.4,28.9,-94.4,30.6';
+
+/* Type-ahead suggestions. Photon (komoot) — free, no key, built for autocomplete.
+ * Biased toward Houston. Swap provider here later (Mapbox/Google) without
+ * touching callers. */
+export async function suggestAddresses(query: string): Promise<Suggestion[]> {
+  const q = query.trim();
+  if (q.length < 3) return [];
+
+  const url =
+    'https://photon.komoot.io/api/' +
+    `?q=${encodeURIComponent(q)}` +
+    `&lat=${HOUSTON.lat}&lon=${HOUSTON.lng}` +
+    `&bbox=${HOUSTON_BBOX}` +
+    '&limit=6&lang=en';
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const features = Array.isArray(data?.features) ? data.features : [];
+    return features
+      .map((f: unknown): Suggestion | null => {
+        const feat = f as {
+          geometry?: { coordinates?: [number, number] };
+          properties?: Record<string, string>;
+        };
+        const coords = feat.geometry?.coordinates;
+        if (!coords || coords.length < 2) return null;
+        return {
+          label: formatSuggestion(feat.properties ?? {}),
+          lng: coords[0],
+          lat: coords[1],
+        };
+      })
+      .filter((s: Suggestion | null): s is Suggestion => s !== null);
+  } catch {
+    return [];
+  }
+}
+
+function formatSuggestion(p: Record<string, string>): string {
+  const line1 = [p.housenumber, p.street].filter(Boolean).join(' ') || p.name;
+  const parts = [line1, p.city, p.state, p.postcode].filter(Boolean);
+  return parts.join(', ');
+}
+
 export async function geocode(address: string): Promise<GeoPoint | null> {
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (token) return geocodeMapbox(address, token);

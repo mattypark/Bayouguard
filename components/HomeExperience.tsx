@@ -20,11 +20,15 @@ export default function HomeExperience({ initial }: { initial: FloodView }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const onSearch = async (address: string, submitted: boolean) => {
+  const onSearch = async (
+    address: string,
+    submitted: boolean,
+    coords?: { lat: number; lng: number },
+  ) => {
     setLoading(true);
     setError(null);
     try {
-      const next = await fetchFloodView(address);
+      const next = await fetchFloodView(address, coords);
       setView(next);
       if (submitted) setMode('map');
     } catch {

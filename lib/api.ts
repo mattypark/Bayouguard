@@ -167,12 +167,18 @@ const MOCK_VIEW: FloodView = { snapshot: MOCK, center: null, gauges: [] };
 
 /* Full assembly: geocode -> /risk + /gauges + weather -> snapshot + map data.
  * Both the SSR snapshot and the interactive map are built from this. */
-export async function getFloodView(address?: string): Promise<FloodView> {
+export async function getFloodView(
+  address?: string,
+  coords?: { lat: number; lng: number },
+): Promise<FloodView> {
   if (!BASE) return MOCK_VIEW;
 
   const query = address ?? DEFAULT_ADDRESS;
 
-  const geo = await geocode(query);
+  // A picked autocomplete suggestion already carries coords — skip re-geocoding.
+  const geo = coords
+    ? { lat: coords.lat, lng: coords.lng, label: address }
+    : await geocode(query);
   if (!geo) return MOCK_VIEW; // unresolvable address -> keep UI populated
 
   const [risk, gauges, weather] = await Promise.all([

@@ -10,7 +10,18 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const address = searchParams.get('address') ?? undefined;
+  const latRaw = searchParams.get('lat');
+  const lngRaw = searchParams.get('lng');
 
-  const view = await getFloodView(address);
+  const coords =
+    latRaw && lngRaw
+      ? { lat: Number(latRaw), lng: Number(lngRaw) }
+      : undefined;
+  const valid =
+    coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)
+      ? coords
+      : undefined;
+
+  const view = await getFloodView(address, valid);
   return NextResponse.json(view);
 }
