@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cs-sky: #F0F5FF;
+  --cs-navy: #1A4480;
+  --cs-teal: #00939A;
+  --cs-midnight: #1A1A2E;
+}
+
+html, body {
+  background-color: var(--cs-sky);
+  color: var(--cs-midnight);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Water ripple rings around risk badge */
+@keyframes ripple {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  70%  { transform: scale(2.4); opacity: 0;    }
+  100% { transform: scale(2.4); opacity: 0;    }
+}
+.ripple-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  animation: ripple 2.6s ease-out infinite;
+}
+.ripple-ring.r2 { animation-delay: 0.7s; }
+.ripple-ring.r3 { animation-delay: 1.4s; }
+
+/* Gauge bar breathe */
+@keyframes breathe {
+  0%, 100% { transform: scaleY(1) translateX(0); }
+  50%      { transform: scaleY(1.25) translateX(-3px); }
+}
+.bar-breathe { transform-origin: bottom; animation: breathe 3.2s ease-in-out infinite; }
+
+/* Card stagger reveal */
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.card-reveal { animation: fadeSlide 0.5s ease forwards; opacity: 0; }
+
+/* Arc sweep */
+@keyframes sweep { from { stroke-dashoffset: 220; } to { stroke-dashoffset: 0; } }
+
+/* Soft wave drift for hero background SVG */
+@keyframes drift {
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-40px); }
+  100% { transform: translateX(0); }
+}
+.wave-drift   { animation: drift 14s ease-in-out infinite; }
+.wave-drift-2 { animation: drift 20s ease-in-out infinite reverse; }
+
+/* Risk badge color transition */
+.risk-badge { transition: background-color 600ms ease, border-color 600ms ease; }
+
+/* Hide scrollbar on horizontal scroll strips */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* Reduced motion — kill everything */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
