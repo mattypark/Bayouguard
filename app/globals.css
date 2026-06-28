@@ -2,72 +2,177 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme tokens (RGB triplets so Tailwind alpha utilities work) ──────────── */
+:root,
+[data-theme='dark'] {
+  --ob-bg-rgb: 10 12 16;
+  --ob-bg2-rgb: 14 17 23;
+  --ob-surface-rgb: 21 25 34;
+  --ob-surface2-rgb: 28 33 44;
+  --ob-border-rgb: 38 45 58;
+  --ob-text-rgb: 230 237 243;
+  --ob-muted-rgb: 139 151 167;
+  --ob-faint-rgb: 90 100 115;
+  --ob-accent-rgb: 76 194 255;
+
+  --ob-glow-a: rgba(76, 194, 255, 0.08);
+  --ob-glow-b: rgba(192, 132, 252, 0.05);
+}
+
+[data-theme='light'] {
+  --ob-bg-rgb: 240 243 249;
+  --ob-bg2-rgb: 230 235 243;
+  --ob-surface-rgb: 255 255 255;
+  --ob-surface2-rgb: 240 243 249;
+  --ob-border-rgb: 205 214 228;
+  --ob-text-rgb: 22 30 44;
+  --ob-muted-rgb: 75 90 110;
+  --ob-faint-rgb: 120 134 154;
+  --ob-accent-rgb: 20 130 210;
+
+  --ob-glow-a: rgba(20, 130, 210, 0.1);
+  --ob-glow-b: rgba(120, 80, 220, 0.06);
+}
+
 :root {
-  --cs-sky: #F0F5FF;
-  --cs-navy: #1A4480;
-  --cs-teal: #00939A;
-  --cs-midnight: #1A1A2E;
+  --tier-low: #34d399;
+  --tier-med: #f5b14c;
+  --tier-high: #ff5d5d;
+  --tier-crit: #c084fc;
+
+  --duration-fast: 150ms;
+  --duration-normal: 320ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-html, body {
-  background-color: var(--cs-sky);
-  color: var(--cs-midnight);
+html,
+body {
+  height: 100%;
+  background-color: rgb(var(--ob-bg-rgb));
+  color: rgb(var(--ob-text-rgb));
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Water ripple rings around risk badge */
-@keyframes ripple {
-  0%   { transform: scale(1);   opacity: 0.55; }
-  70%  { transform: scale(2.4); opacity: 0;    }
-  100% { transform: scale(2.4); opacity: 0;    }
+/* Theme transition for the chrome (not the canvas). */
+body,
+.ob-panel {
+  transition:
+    background-color var(--duration-normal) ease,
+    border-color var(--duration-normal) ease,
+    color var(--duration-normal) ease;
 }
-.ripple-ring {
-  position: absolute;
+
+/* Ambient radial glow behind the whole app. */
+body::before {
+  content: '';
+  position: fixed;
   inset: 0;
-  border-radius: 9999px;
-  border: 2px solid currentColor;
-  animation: ripple 2.6s ease-out infinite;
+  z-index: -1;
+  background:
+    radial-gradient(1200px 700px at 50% -10%, var(--ob-glow-a), transparent 70%),
+    radial-gradient(900px 600px at 100% 110%, var(--ob-glow-b), transparent 70%),
+    linear-gradient(180deg, rgb(var(--ob-bg-rgb)) 0%, rgb(var(--ob-bg2-rgb)) 100%);
+  background-attachment: fixed;
 }
-.ripple-ring.r2 { animation-delay: 0.7s; }
-.ripple-ring.r3 { animation-delay: 1.4s; }
 
-/* Gauge bar breathe */
-@keyframes breathe {
-  0%, 100% { transform: scaleY(1) translateX(0); }
-  50%      { transform: scaleY(1.25) translateX(-3px); }
+/* ── Reusable atmosphere helpers ──────────────────────────────────────────── */
+.ob-panel {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--ob-surface2-rgb) / 0.85),
+    rgb(var(--ob-surface-rgb) / 0.85)
+  );
+  border: 1px solid rgb(var(--ob-border-rgb));
+  backdrop-filter: blur(14px) saturate(120%);
 }
-.bar-breathe { transform-origin: bottom; animation: breathe 3.2s ease-in-out infinite; }
 
-/* Card stagger reveal */
-@keyframes fadeSlide {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0);   }
+.ob-hairline {
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--ob-border-rgb)),
+    transparent
+  );
 }
-.card-reveal { animation: fadeSlide 0.5s ease forwards; opacity: 0; }
 
-/* Arc sweep */
-@keyframes sweep { from { stroke-dashoffset: 220; } to { stroke-dashoffset: 0; } }
-
-/* Soft wave drift for hero background SVG */
-@keyframes drift {
-  0%   { transform: translateX(0); }
-  50%  { transform: translateX(-40px); }
-  100% { transform: translateX(0); }
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
 }
-.wave-drift   { animation: drift 14s ease-in-out infinite; }
-.wave-drift-2 { animation: drift 20s ease-in-out infinite reverse; }
 
-/* Risk badge color transition */
-.risk-badge { transition: background-color 600ms ease, border-color 600ms ease; }
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes ob-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.reveal {
+  animation: ob-fade-up 0.5s var(--ease-out-expo) both;
+}
 
-/* Hide scrollbar on horizontal scroll strips */
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { scrollbar-width: none; }
+@keyframes ob-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: ob-spin 0.8s linear infinite;
+}
 
-/* Reduced motion — kill everything */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--ob-border-rgb));
+  border-radius: 8px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Leaflet theming. */
+.leaflet-container {
+  background: rgb(var(--ob-bg2-rgb)) !important;
+  font-family: inherit;
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: rgb(var(--ob-surface2-rgb)) !important;
+  color: rgb(var(--ob-text-rgb)) !important;
+  border: 1px solid rgb(var(--ob-border-rgb));
+}
+.leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 13px;
+}
+.leaflet-control-attribution {
+  background: rgb(var(--ob-bg-rgb) / 0.7) !important;
+  color: rgb(var(--ob-faint-rgb)) !important;
+}
+.leaflet-control-attribution a {
+  color: rgb(var(--ob-muted-rgb)) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

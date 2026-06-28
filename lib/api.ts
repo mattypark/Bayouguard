@@ -7,6 +7,7 @@
 
 import type {
   HomeSnapshot,
+  RiskSnapshot,
   Tier,
   BayouReading,
   DriveVerdict,
@@ -68,6 +69,43 @@ function normalizeTier(t: string): Tier {
     case 'MEDIUM':   return 'MEDIUM';
     default:         return 'LOW';
   }
+}
+
+// Representative score per tier when we have to synthesize risk locally.
+const TIER_SCORE: Record<Tier, number> = {
+  LOW: 20,
+  MEDIUM: 50,
+  HIGH: 75,
+  CRITICAL: 95,
+};
+
+/* Fallback risk when the backend /risk endpoint is unavailable (it can 500 on
+ * gauges with no StreamData). Uses the nearest *valid* gauge from /gauges, so
+ * the reading stays real and location-specific instead of collapsing to mock. */
+function riskFromNearestGauge(
+  gauges: BackendGauge[],
+  lat: number,
+  lng: number,
+  address: string,
+): RiskSnapshot {
+  let nearest = gauges[0];
+  let best = Infinity;
+  for (const g of gauges) {
+    const d = haversine(lat, lng, g.latitude, g.longitude);
+    if (d < best) {
+      best = d;
+      nearest = g;
+    }
+  }
+  const tier = normalizeTier(nearest.risk_tier);
+  return {
+    address,
+    zip: zipFromAddress(address),
+    score: TIER_SCORE[tier],
+    tier,
+    message: `Nearest gauge (${best.toFixed(1)} mi away) reads ${nearest.current_level_ft} ft; it floods at ${nearest.flood_level_ft} ft.`,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 // Backend has no drive verdict; derive it from the risk tier.
@@ -187,22 +225,33 @@ export async function getFloodView(
     getWeather(geo.lat, geo.lng),
   ]);
 
-  if (!risk) return { ...MOCK_VIEW, center: { lat: geo.lat, lng: geo.lng } };
+  // Nothing usable from the backend at all — keep the UI populated, pin the map.
+  if (!risk && gauges.length === 0) {
+    return { ...MOCK_VIEW, center: { lat: geo.lat, lng: geo.lng } };
+  }
 
-  const tier = normalizeTier(risk.risk_tier);
-  const bayous = gauges.length ? nearestBayous(gauges, geo.lat, geo.lng) : MOCK.bayous;
+  const resolvedAddress = geo.label ?? risk?.address ?? query;
+  const bayous = gauges.length
+    ? nearestBayous(gauges, geo.lat, geo.lng)
+    : MOCK.bayous;
+
+  // Prefer the backend's ML risk; otherwise synthesize from the nearest gauge so
+  // the graph + reading always reflect real data even when /risk errors.
+  const riskSnapshot: RiskSnapshot = risk
+    ? {
+        address: resolvedAddress,
+        zip: zipFromAddress(resolvedAddress),
+        score: risk.risk_score,
+        tier: normalizeTier(risk.risk_tier),
+        message: risk.message,
+        updatedAt: new Date().toISOString(),
+      }
+    : riskFromNearestGauge(gauges, geo.lat, geo.lng, resolvedAddress);
 
   const snapshot: HomeSnapshot = {
-    risk: {
-      address: geo.label ?? risk.address,
-      zip: zipFromAddress(geo.label ?? query),
-      score: risk.risk_score,
-      tier,
-      message: risk.message,
-      updatedAt: new Date().toISOString(),
-    },
+    risk: riskSnapshot,
     weather: weather ?? MOCK.weather,
-    drive: driveFromTier(tier),
+    drive: driveFromTier(riskSnapshot.tier),
     bayous,
   };
 

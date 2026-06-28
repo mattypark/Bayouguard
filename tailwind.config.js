@@ -7,28 +7,34 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'cs-navy':      '#1A4480',
-        'cs-navy-lt':   '#E3EDFF',
-        'cs-teal':      '#00939A',
-        'cs-teal-lt':   '#D6F2F3',
-        'cs-sky':       '#F0F5FF',
-        'cs-midnight':  '#1A1A2E',
-        'cs-steel':     '#4A6FA5',
-        'cs-amber':     '#E8962A',
-        'cs-amber-lt':  '#FFF3E0',
-        'cs-border':    '#CDD8ED',
-        'risk-low':     '#1B5E20',
-        'risk-low-lt':  '#E8F5E9',
-        'risk-med':     '#E65100',
-        'risk-med-lt':  '#FFF3E0',
-        'risk-high':    '#B71C1C',
-        'risk-high-lt': '#FFEBEE',
-        'risk-crit':    '#4A148C',
-        'risk-crit-lt': '#F3E5F5',
+        // Obsidian surfaces — CSS-var driven so the light/dark toggle works.
+        ob: {
+          bg: 'rgb(var(--ob-bg-rgb) / <alpha-value>)',
+          bg2: 'rgb(var(--ob-bg2-rgb) / <alpha-value>)',
+          surface: 'rgb(var(--ob-surface-rgb) / <alpha-value>)',
+          surface2: 'rgb(var(--ob-surface2-rgb) / <alpha-value>)',
+          border: 'rgb(var(--ob-border-rgb) / <alpha-value>)',
+          text: 'rgb(var(--ob-text-rgb) / <alpha-value>)',
+          muted: 'rgb(var(--ob-muted-rgb) / <alpha-value>)',
+          faint: 'rgb(var(--ob-faint-rgb) / <alpha-value>)',
+          accent: 'rgb(var(--ob-accent-rgb) / <alpha-value>)',
+        },
+        // Risk tiers (luminous on dark)
+        tier: {
+          low: '#34d399',
+          med: '#f5b14c',
+          high: '#ff5d5d',
+          crit: '#c084fc',
+        },
       },
       fontFamily: {
         serif: ['var(--font-dm-serif)', 'serif'],
-        sans:  ['var(--font-inter)', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-jbmono)', 'ui-monospace', 'monospace'],
+      },
+      boxShadow: {
+        glow: '0 0 0 1px rgba(76,194,255,0.25), 0 0 24px -4px rgba(76,194,255,0.35)',
+        panel: '0 24px 60px -20px rgba(0,0,0,0.7)',
       },
     },
   },

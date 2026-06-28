@@ -24,17 +24,22 @@ export default function AddressSearch({
 
   const boxRef = useRef<HTMLDivElement>(null);
   const skipNextFetch = useRef(false); // suppress fetch right after a pick/restore
+  const onSearchRef = useRef(onSearch); // keep the mount effect off a stale closure
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  });
 
   // Restore saved address on mount: refresh status only, don't open the map.
+  // Reads onSearch from a ref so the empty dep array is genuinely safe.
   useEffect(() => {
     const v = localStorage.getItem(STORAGE_KEY);
     if (v) {
       skipNextFetch.current = true;
       setValue(v);
       setSaved(v);
-      onSearch?.(v, false);
+      onSearchRef.current?.(v, false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Debounced type-ahead. Aborts the in-flight request on each keystroke.
   useEffect(() => {
@@ -113,35 +118,40 @@ export default function AddressSearch({
     <div ref={boxRef} className="relative mx-auto w-full max-w-2xl">
       <form
         onSubmit={submit}
-        className="flex w-full items-center gap-2 rounded-full border border-cs-border bg-white p-1.5 pl-5 shadow-sm focus-within:border-cs-teal focus-within:ring-2 focus-within:ring-cs-teal/30"
+        className="ob-panel flex w-full items-center gap-2 rounded-full p-1.5 pl-5 shadow-panel focus-within:border-ob-accent/60 focus-within:shadow-glow"
       >
-        <span className="text-cs-steel" aria-hidden>
-          🔎
+        <span className="text-ob-faint" aria-hidden>
+          ⌖
         </span>
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
-          placeholder="Enter your Houston address…"
+          placeholder="Enter a Houston address…"
           aria-label="Search address"
+          role="combobox"
           aria-autocomplete="list"
           aria-expanded={open}
+          aria-controls="address-listbox"
+          aria-activedescendant={
+            open && active >= 0 ? `address-option-${active}` : undefined
+          }
           autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent py-2 text-[15px] outline-none placeholder:text-cs-steel"
+          className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-ob-text outline-none placeholder:text-ob-faint"
         />
         <button
           type="button"
           onClick={save}
           title={saved === value && value ? 'Saved' : 'Save address'}
           aria-label="Save address"
-          className="hidden h-10 w-10 items-center justify-center rounded-full text-cs-steel hover:bg-cs-sky sm:flex"
+          className="hidden h-10 w-10 items-center justify-center rounded-full text-ob-faint transition hover:bg-ob-surface2 hover:text-ob-accent sm:flex"
         >
           {saved === value && value ? '★' : '☆'}
         </button>
         <button
           type="submit"
-          className="h-10 rounded-full bg-cs-navy px-5 text-sm font-semibold text-white transition hover:bg-cs-navy/90"
+          className="h-10 rounded-full bg-ob-accent px-5 text-sm font-semibold text-ob-bg transition hover:brightness-110"
         >
           Check risk
         </button>
@@ -149,21 +159,28 @@ export default function AddressSearch({
 
       {open && suggestions.length > 0 && (
         <ul
+          id="address-listbox"
           role="listbox"
-          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-cs-border bg-white py-1 text-left shadow-xl"
+          aria-label="Address suggestions"
+          className="ob-panel absolute z-50 mt-2 w-full overflow-hidden rounded-2xl py-1 text-left shadow-panel"
         >
           {suggestions.map((s, i) => (
-            <li key={`${s.label}-${i}`} role="option" aria-selected={i === active}>
+            <li
+              key={`${s.lat},${s.lng}`}
+              id={`address-option-${i}`}
+              role="option"
+              aria-selected={i === active}
+            >
               <button
                 type="button"
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(s)}
                 className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
-                  i === active ? 'bg-cs-sky text-cs-navy' : 'text-cs-midnight hover:bg-cs-sky'
+                  i === active ? 'bg-ob-accent/15 text-ob-accent' : 'text-ob-muted hover:bg-ob-surface2'
                 }`}
               >
-                <span className="text-cs-steel" aria-hidden>
-                  📍
+                <span className="text-ob-faint" aria-hidden>
+                  ⌖
                 </span>
                 <span className="truncate">{s.label}</span>
               </button>
