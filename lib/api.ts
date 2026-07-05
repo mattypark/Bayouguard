@@ -15,7 +15,9 @@ import type {
   FloodView,
 } from './types';
 import { geocode } from './geocode';
-import { getWeather } from './weather';
+import { getWeather, getRainForecast } from './weather';
+import { getGaugeExtras, type GaugeExtra } from './hcfws';
+import { buildOutlook } from './outlook';
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 const DEFAULT_ADDRESS = '2100 Memorial Dr, Houston, TX 77027';
@@ -137,12 +139,13 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-// Nearest gauges -> bayou readings. Gauges carry no name, so label by id.
-// /gauges is a single snapshot (no history), so spark is a flat 2-point series.
+// Nearest gauges -> bayou readings. Gauges carry no name, so label by id and
+// county network; the live HCFWS trend rides along for the arrows in the UI.
 function nearestBayous(
   gauges: BackendGauge[],
   lat: number,
   lng: number,
+  extras: Map<number, GaugeExtra>,
 ): BayouReading[] {
   return [...gauges]
     .sort(
@@ -151,12 +154,34 @@ function nearestBayous(
         haversine(lat, lng, b.latitude, b.longitude),
     )
     .slice(0, NEAREST_BAYOU_COUNT)
-    .map((g) => ({
-      name: `Gauge ${g.id}`,
-      stage: g.current_level_ft,
-      flood: g.flood_level_ft,
-      spark: [g.current_level_ft, g.current_level_ft],
-    }));
+    .map((g) => {
+      const x = extras.get(g.id);
+      return {
+        name: x?.county ? `Gauge ${g.id} · ${x.county}` : `Gauge ${g.id}`,
+        stage: g.current_level_ft,
+        flood: g.flood_level_ft,
+        spark: [g.current_level_ft, g.current_level_ft],
+        trend: x?.trend,
+      };
+    });
+}
+
+// Nearest single backend gauge (for the outlook inputs).
+function nearestGauge(
+  gauges: BackendGauge[],
+  lat: number,
+  lng: number,
+): BackendGauge | null {
+  let best: BackendGauge | null = null;
+  let bestD = Infinity;
+  for (const g of gauges) {
+    const d = haversine(lat, lng, g.latitude, g.longitude);
+    if (d < bestD) {
+      bestD = d;
+      best = g;
+    }
+  }
+  return best;
 }
 
 async function fetchRisk(
@@ -189,16 +214,26 @@ async function fetchGauges(): Promise<BackendGauge[]> {
   }
 }
 
-function toGaugePoints(gauges: BackendGauge[]): GaugePoint[] {
-  return gauges.map((g) => ({
-    id: g.id,
-    lat: g.latitude,
-    lng: g.longitude,
-    current: g.current_level_ft,
-    flood: g.flood_level_ft,
-    buffer: g.buffer_ft,
-    tier: normalizeTier(g.risk_tier),
-  }));
+function toGaugePoints(
+  gauges: BackendGauge[],
+  extras: Map<number, GaugeExtra>,
+): GaugePoint[] {
+  return gauges.map((g) => {
+    const x = extras.get(g.id);
+    return {
+      id: g.id,
+      lat: g.latitude,
+      lng: g.longitude,
+      current: g.current_level_ft,
+      flood: g.flood_level_ft,
+      buffer: g.buffer_ft,
+      tier: normalizeTier(g.risk_tier),
+      trend: x?.trend,
+      rainfall: x?.rainfall,
+      readAt: x?.readAt,
+      county: x?.county,
+    };
+  });
 }
 
 const MOCK_VIEW: FloodView = { snapshot: MOCK, center: null, gauges: [] };
@@ -219,10 +254,12 @@ export async function getFloodView(
     : await geocode(query);
   if (!geo) return MOCK_VIEW; // unresolvable address -> keep UI populated
 
-  const [risk, gauges, weather] = await Promise.all([
+  const [risk, gauges, weather, extras, rain] = await Promise.all([
     fetchRisk(geo.label ?? query, geo.lat, geo.lng),
     fetchGauges(),
     getWeather(geo.lat, geo.lng),
+    getGaugeExtras(),
+    getRainForecast(geo.lat, geo.lng),
   ]);
 
   // Nothing usable from the backend at all — keep the UI populated, pin the map.
@@ -232,7 +269,7 @@ export async function getFloodView(
 
   const resolvedAddress = geo.label ?? risk?.address ?? query;
   const bayous = gauges.length
-    ? nearestBayous(gauges, geo.lat, geo.lng)
+    ? nearestBayous(gauges, geo.lat, geo.lng, extras)
     : MOCK.bayous;
 
   // Prefer the backend's ML risk; otherwise synthesize from the nearest gauge so
@@ -248,17 +285,29 @@ export async function getFloodView(
       }
     : riskFromNearestGauge(gauges, geo.lat, geo.lng, resolvedAddress);
 
+  // 6-hour outlook: nearest gauge's headroom + live trend + incoming rain.
+  const near = nearestGauge(gauges, geo.lat, geo.lng);
+  const outlook = near
+    ? buildOutlook(
+        risk?.buffer_ft ?? near.buffer_ft,
+        extras.get(near.id)?.trend ?? 0,
+        rain,
+      )
+    : undefined;
+
   const snapshot: HomeSnapshot = {
     risk: riskSnapshot,
     weather: weather ?? MOCK.weather,
     drive: driveFromTier(riskSnapshot.tier),
     bayous,
+    rain: rain ?? undefined,
+    outlook,
   };
 
   return {
     snapshot,
     center: { lat: geo.lat, lng: geo.lng },
-    gauges: toGaugePoints(gauges),
+    gauges: toGaugePoints(gauges, extras),
   };
 }
 

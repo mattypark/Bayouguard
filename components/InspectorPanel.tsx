@@ -4,9 +4,12 @@
  * selected: the searched address (full risk + weather + drive + bayous) or a
  * single gauge (level vs flood stage, headroom, distance). */
 
+import { useEffect, useState } from 'react';
 import type { GraphSelection } from './WatershedGraph';
-import type { HomeSnapshot, Tier, DriveVerdict } from '@/lib/types';
+import type { HomeSnapshot, Tier, DriveVerdict, Outlook, RainForecast } from '@/lib/types';
+import type { GaugeHistory } from '@/lib/history';
 import { TIER_COLOR, TIER_TINT, TIER_LABEL } from '@/lib/theme';
+import { classifyTrend } from '@/lib/hcfws';
 
 const DRIVE_LABEL: Record<DriveVerdict['state'], string> = {
   YES: 'Safe to drive',
@@ -18,6 +21,36 @@ const DRIVE_COLOR: Record<DriveVerdict['state'], string> = {
   CAUTION: TIER_COLOR.MEDIUM,
   NO: TIER_COLOR.HIGH,
 };
+
+// Outlook levels reuse the tier palette so the panel stays one color system.
+const OUTLOOK_COLOR: Record<Outlook['level'], string> = {
+  CLEAR: TIER_COLOR.LOW,
+  WATCH: TIER_COLOR.MEDIUM,
+  WARNING: TIER_COLOR.HIGH,
+};
+const OUTLOOK_TINT: Record<Outlook['level'], string> = {
+  CLEAR: TIER_TINT.LOW,
+  WATCH: TIER_TINT.MEDIUM,
+  WARNING: TIER_TINT.HIGH,
+};
+
+// Live gauge trend -> arrow + color. Rising water is the danger direction.
+function TrendArrow({ trend }: { trend: number }) {
+  const state = classifyTrend(trend);
+  if (state === 'steady') {
+    return <span className="font-mono text-xs text-ob-faint">→ steady</span>;
+  }
+  const rising = state === 'rising';
+  return (
+    <span
+      className="font-mono text-xs"
+      style={{ color: rising ? TIER_COLOR.HIGH : TIER_COLOR.LOW }}
+      title={`${rising ? 'Rising' : 'Falling'} ${Math.abs(trend).toFixed(2)} ft/hr`}
+    >
+      {rising ? '↑' : '↓'} {Math.abs(trend).toFixed(2)} ft/hr
+    </span>
+  );
+}
 
 function haversineMiles(
   lat1: number,
@@ -70,6 +103,168 @@ function Metric({
   );
 }
 
+/* 6-hour outlook banner: where the water is heading, not just where it is. */
+function OutlookCard({ outlook }: { outlook: Outlook }) {
+  const color = OUTLOOK_COLOR[outlook.level];
+  return (
+    <div
+      className="mt-3 rounded-xl border p-3"
+      style={{ borderColor: color, backgroundColor: OUTLOOK_TINT[outlook.level] }}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-[0.16em] text-ob-faint">
+          Next 6 hours
+        </p>
+        <span
+          className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+          style={{ backgroundColor: OUTLOOK_TINT[outlook.level], color }}
+        >
+          {outlook.level}
+        </span>
+      </div>
+      <p className="mt-0.5 font-semibold" style={{ color }}>
+        {outlook.headline}
+      </p>
+      <p className="mt-0.5 text-xs leading-relaxed text-ob-muted">{outlook.detail}</p>
+    </div>
+  );
+}
+
+/* Hourly rain bars for the next 12h. Height scales to the wettest hour so a
+ * drizzle day still reads; the wettest hour caps the scale. */
+function RainBars({ rain }: { rain: RainForecast }) {
+  const max = Math.max(0.1, ...rain.inches);
+  return (
+    <div className="mt-4">
+      <div className="mb-1.5 flex items-baseline justify-between text-xs">
+        <span className="text-[11px] uppercase tracking-[0.18em] text-ob-faint">
+          Rain · next 12h
+        </span>
+        <span className="font-mono tabular text-ob-muted">
+          {rain.totalNext12h.toFixed(2)}&quot; total
+        </span>
+      </div>
+      <div className="flex h-10 items-end gap-1">
+        {rain.inches.map((v, i) => (
+          <div
+            key={rain.hours[i] ?? i}
+            className="flex-1 rounded-t-sm bg-ob-accent/70 transition-all"
+            style={{
+              height: `${Math.max(4, (v / max) * 100)}%`,
+              opacity: v > 0 ? 1 : 0.18,
+            }}
+            title={`${new Date(rain.hours[i]).getHours()}:00 — ${v.toFixed(2)}"`}
+          />
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-ob-faint">
+        <span>now</span>
+        <span>+6h</span>
+        <span>+12h</span>
+      </div>
+    </div>
+  );
+}
+
+/* 48h water-level sparkline for a single gauge. Fetches on gauge select;
+ * renders nothing until (and unless) history arrives — additive UI only. */
+function HistorySparkline({ gaugeId, color }: { gaugeId: number; color: string }) {
+  const [history, setHistory] = useState<GaugeHistory | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setHistory(null);
+    fetch(`/api/gauge-history?id=${gaugeId}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: GaugeHistory | null) => setHistory(data))
+      .catch(() => setHistory(null))
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [gaugeId]);
+
+  if (loading) {
+    return (
+      <div className="mt-4">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-ob-faint">
+          Level · last 48h
+        </p>
+        <div className="mt-1.5 h-14 animate-pulse rounded-lg bg-ob-bg2/60" />
+      </div>
+    );
+  }
+  if (!history || history.points.length < 2) return null;
+
+  const { points, floodLevel } = history;
+  const levels = points.map((p) => p.level);
+  let min = Math.min(...levels);
+  let max = Math.max(...levels);
+  // Include flood stage in scale only when it's near the data, so a gauge
+  // sitting 30 ft below flood still shows visible movement.
+  const floodInRange =
+    floodLevel != null && floodLevel <= max + (max - min) * 0.75 + 0.5;
+  if (floodInRange && floodLevel != null) max = Math.max(max, floodLevel);
+  const span = Math.max(max - min, 0.5);
+  min -= span * 0.08;
+  max += span * 0.08;
+
+  const W = 240;
+  const H = 56;
+  const x = (i: number) => (i / (points.length - 1)) * W;
+  const y = (v: number) => H - ((v - min) / (max - min)) * H;
+  const path = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.level).toFixed(1)}`)
+    .join(' ');
+  const area = `${path} L${W},${H} L0,${H} Z`;
+  const last = points[points.length - 1];
+
+  return (
+    <div className="mt-4">
+      <div className="mb-1.5 flex items-baseline justify-between text-xs">
+        <span className="text-[11px] uppercase tracking-[0.18em] text-ob-faint">
+          Level · last 48h
+        </span>
+        <span className="font-mono tabular text-ob-muted">
+          {last.level.toFixed(2)} ft now
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-14 w-full"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`Water level over the last 48 hours, currently ${last.level.toFixed(1)} feet`}
+      >
+        <path d={area} fill={color} opacity={0.12} />
+        {floodInRange && floodLevel != null && (
+          <line
+            x1={0}
+            x2={W}
+            y1={y(floodLevel)}
+            y2={y(floodLevel)}
+            stroke={TIER_COLOR.CRITICAL}
+            strokeWidth={1}
+            strokeDasharray="4 3"
+            opacity={0.7}
+          />
+        )}
+        <path d={path} fill="none" stroke={color} strokeWidth={1.5} />
+        <circle cx={x(points.length - 1)} cy={y(last.level)} r={2.5} fill={color} />
+      </svg>
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-ob-faint">
+        <span>-48h</span>
+        {floodInRange && floodLevel != null && (
+          <span style={{ color: TIER_COLOR.CRITICAL }}>
+            flood {floodLevel.toFixed(1)} ft
+          </span>
+        )}
+        <span>now</span>
+      </div>
+    </div>
+  );
+}
+
 function FillBar({ pct, color }: { pct: number; color: string }) {
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-ob-bg2">
@@ -114,9 +309,14 @@ export default function InspectorPanel({
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.18em] text-ob-faint">
-              Flood gauge
+              Flood gauge{g.county ? ` · ${g.county} network` : ''}
             </p>
             <h2 className="font-mono text-2xl text-ob-text">#{g.id}</h2>
+            {g.trend != null && (
+              <div className="mt-1">
+                <TrendArrow trend={g.trend} />
+              </div>
+            )}
           </div>
           <TierBadge tier={g.tier} />
         </div>
@@ -131,6 +331,8 @@ export default function InspectorPanel({
           <FillBar pct={fillPct} color={TIER_COLOR[g.tier]} />
         </div>
 
+        <HistorySparkline gaugeId={g.id} color={TIER_COLOR[g.tier]} />
+
         <div className="mt-4 grid grid-cols-2 gap-2.5">
           <Metric label="Current" value={g.current.toFixed(1)} unit="ft" />
           <Metric label="Flood stage" value={g.flood.toFixed(1)} unit="ft" />
@@ -140,17 +342,21 @@ export default function InspectorPanel({
           ) : (
             <Metric label="Tier" value={TIER_LABEL[g.tier]} />
           )}
+          {g.rainfall != null && g.rainfall > 0 && (
+            <Metric label="Rain at site" value={g.rainfall.toFixed(2)} unit="in" />
+          )}
         </div>
 
         <p className="mt-4 font-mono text-[11px] leading-relaxed text-ob-faint">
           {g.lat.toFixed(4)}, {g.lng.toFixed(4)}
+          {g.readAt ? ` · read ${new Date(g.readAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
         </p>
       </PanelShell>
     );
   }
 
   // ── Address node (or default summary) ─────────────────────────────────────
-  const { risk, weather, drive, bayous } = snapshot;
+  const { risk, weather, drive, bayous, rain, outlook } = snapshot;
   return (
     <PanelShell onClose={onClose} onSwitch={onSwitch} switchLabel={switchLabel}>
       <div className="flex items-center justify-between">
@@ -176,6 +382,8 @@ export default function InspectorPanel({
       </div>
       <p className="mt-3 text-sm leading-relaxed text-ob-muted">{risk.message}</p>
 
+      {outlook && <OutlookCard outlook={outlook} />}
+
       <div className="mt-4 grid grid-cols-2 gap-2.5">
         <Metric label="Temp" value={weather.tempF} unit="°F" />
         <Metric label="Conditions" value={weather.conditions} />
@@ -194,6 +402,8 @@ export default function InspectorPanel({
         <p className="mt-0.5 text-xs text-ob-muted">{drive.message}</p>
       </div>
 
+      {rain && <RainBars rain={rain} />}
+
       <div className="mt-4">
         <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-ob-faint">
           Nearest gauges
@@ -205,10 +415,13 @@ export default function InspectorPanel({
               pct >= 90 ? TIER_COLOR.CRITICAL : pct >= 70 ? TIER_COLOR.HIGH : pct >= 45 ? TIER_COLOR.MEDIUM : TIER_COLOR.LOW;
             return (
               <li key={b.name}>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="text-ob-text">{b.name}</span>
-                  <span className="font-mono tabular text-ob-muted">
-                    {b.stage.toFixed(1)} / {b.flood.toFixed(1)} ft
+                <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate text-ob-text">{b.name}</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {b.trend != null && <TrendArrow trend={b.trend} />}
+                    <span className="font-mono tabular text-ob-muted">
+                      {b.stage.toFixed(1)} / {b.flood.toFixed(1)} ft
+                    </span>
                   </span>
                 </div>
                 <FillBar pct={pct} color={color} />

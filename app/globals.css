@@ -167,6 +167,34 @@ body::before {
   color: rgb(var(--ob-muted-rgb)) !important;
 }
 
+/* "Tsunami" ripple rings on map gauges. One divIcon per gauge holds two rings
+ * expanding on a stagger; duration comes from the risk tier (inline style), so
+ * critical gauges pulse hard and fast while safe ones barely breathe. */
+.gauge-ripple {
+  pointer-events: none;
+}
+.gauge-ripple span {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1.5px solid var(--ripple-color);
+  animation: gauge-ripple var(--ripple-duration, 2.4s) ease-out infinite;
+  animation-delay: var(--ripple-delay, 0s);
+}
+.gauge-ripple span:nth-child(2) {
+  animation-delay: calc(var(--ripple-delay, 0s) - var(--ripple-duration, 2.4s) / 2);
+}
+@keyframes gauge-ripple {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

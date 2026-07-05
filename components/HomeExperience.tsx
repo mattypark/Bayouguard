@@ -17,6 +17,7 @@ import AddressSearch from './AddressSearch';
 import NetworkStats from './NetworkStats';
 import TexasLocator from './TexasLocator';
 import InspectorPanel from './InspectorPanel';
+import LayerControl, { DEFAULT_LAYERS, type MapLayers } from './LayerControl';
 import { fetchFloodView } from '@/lib/client';
 import { useTheme } from '@/lib/useTheme';
 import type { FloodView } from '@/lib/types';
@@ -39,6 +40,7 @@ export default function HomeExperience({ initial }: { initial: FloodView }) {
   const [lang, setLang] = useState<Lang>('EN');
   const { mode: theme, toggle: toggleTheme } = useTheme();
   const [selection, setSelection] = useState<GraphSelection | null>(null);
+  const [layers, setLayers] = useState<MapLayers>(DEFAULT_LAYERS);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +83,7 @@ export default function HomeExperience({ initial }: { initial: FloodView }) {
             zoomToCenter={searched}
             selectedId={selection?.id ?? null}
             onSelect={setSelection}
+            layers={layers}
           />
         ) : (
           <WatershedGraph
@@ -124,6 +127,15 @@ export default function HomeExperience({ initial }: { initial: FloodView }) {
           )}
         </div>
       </div>
+
+      {/* Layer toggles (left, map mode only) */}
+      {mode === 'map' && (
+        <div className="pointer-events-none absolute left-4 top-24 z-40 hidden sm:block">
+          <div className="pointer-events-auto">
+            <LayerControl layers={layers} onChange={setLayers} />
+          </div>
+        </div>
+      )}
 
       {/* Network stats (bottom-left) */}
       <div className="pointer-events-none absolute bottom-4 left-4 z-40 hidden sm:block">

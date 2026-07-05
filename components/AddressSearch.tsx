@@ -128,7 +128,7 @@ export default function AddressSearch({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
-          placeholder="Enter a Houston address…"
+          placeholder="Enter a Texas address…"
           aria-label="Search address"
           role="combobox"
           aria-autocomplete="list"
