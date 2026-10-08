@@ -3,7 +3,8 @@
  * address, calls the backend + Open-Meteo, and assembles a HomeSnapshot.
  *
  * Isomorphic: runs on the Next server (initial render) and in the browser (search).
- * Set NEXT_PUBLIC_API_BASE_URL in .env.local. */
+ * Set NEXT_PUBLIC_API_BASE_URL in .env.local. Without it (or when the backend
+ * is down) the gauges come from lib/placeholder.ts and the view says so. */
 
 import type {
   HomeSnapshot,
@@ -18,6 +19,7 @@ import { geocode } from './geocode';
 import { getWeather, getRainForecast } from './weather';
 import { getGaugeExtras, type GaugeExtra } from './hcfws';
 import { buildOutlook } from './outlook';
+import { SAMPLE_GAUGES } from './placeholder';
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 const DEFAULT_ADDRESS = '2100 Memorial Dr, Houston, TX 77027';
@@ -189,6 +191,7 @@ async function fetchRisk(
   lat: number,
   lng: number,
 ): Promise<BackendRisk | null> {
+  if (!BASE) return null;
   const url =
     `${BASE}/risk?address=${encodeURIComponent(address)}` +
     `&lat=${lat}&lng=${lng}`;
@@ -204,6 +207,7 @@ async function fetchRisk(
 }
 
 async function fetchGauges(): Promise<BackendGauge[]> {
+  if (!BASE) return [];
   try {
     const res = await fetch(`${BASE}/gauges`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
@@ -236,7 +240,23 @@ function toGaugePoints(
   });
 }
 
-const MOCK_VIEW: FloodView = { snapshot: MOCK, center: null, gauges: [] };
+/* Real gauges when the backend answers, the placeholder set when it doesn't.
+ * BACKEND: once /gauges is deployed and reliable, the sample branch goes. */
+export async function loadGauges(): Promise<{ gauges: BackendGauge[]; sample: boolean }> {
+  const live = await fetchGauges();
+  return live.length > 0
+    ? { gauges: live, sample: false }
+    : { gauges: [...SAMPLE_GAUGES], sample: true };
+}
+
+function mockView(gauges: BackendGauge[], sample: boolean): FloodView {
+  return {
+    snapshot: MOCK,
+    center: null,
+    gauges: toGaugePoints(gauges, new Map()),
+    sample,
+  };
+}
 
 /* Full assembly: geocode -> /risk + /gauges + weather -> snapshot + map data.
  * Both the SSR snapshot and the interactive map are built from this. */
@@ -244,33 +264,28 @@ export async function getFloodView(
   address?: string,
   coords?: { lat: number; lng: number },
 ): Promise<FloodView> {
-  if (!BASE) return MOCK_VIEW;
-
   const query = address ?? DEFAULT_ADDRESS;
 
   // A picked autocomplete suggestion already carries coords — skip re-geocoding.
   const geo = coords
     ? { lat: coords.lat, lng: coords.lng, label: address }
     : await geocode(query);
-  if (!geo) return MOCK_VIEW; // unresolvable address -> keep UI populated
+  if (!geo) {
+    // Unresolvable address -> keep the UI populated.
+    const { gauges, sample } = await loadGauges();
+    return mockView(gauges, sample);
+  }
 
-  const [risk, gauges, weather, extras, rain] = await Promise.all([
+  const [risk, { gauges, sample }, weather, extras, rain] = await Promise.all([
     fetchRisk(geo.label ?? query, geo.lat, geo.lng),
-    fetchGauges(),
+    loadGauges(),
     getWeather(geo.lat, geo.lng),
     getGaugeExtras(),
     getRainForecast(geo.lat, geo.lng),
   ]);
 
-  // Nothing usable from the backend at all — keep the UI populated, pin the map.
-  if (!risk && gauges.length === 0) {
-    return { ...MOCK_VIEW, center: { lat: geo.lat, lng: geo.lng } };
-  }
-
   const resolvedAddress = geo.label ?? risk?.address ?? query;
-  const bayous = gauges.length
-    ? nearestBayous(gauges, geo.lat, geo.lng, extras)
-    : MOCK.bayous;
+  const bayous = nearestBayous(gauges, geo.lat, geo.lng, extras);
 
   // Prefer the backend's ML risk; otherwise synthesize from the nearest gauge so
   // the graph + reading always reflect real data even when /risk errors.
@@ -308,6 +323,7 @@ export async function getFloodView(
     snapshot,
     center: { lat: geo.lat, lng: geo.lng },
     gauges: toGaugePoints(gauges, extras),
+    sample,
   };
 }
 

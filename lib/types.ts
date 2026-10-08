@@ -75,4 +75,6 @@ export interface FloodView {
   snapshot: HomeSnapshot;
   center: { lat: number; lng: number } | null;
   gauges: GaugePoint[];
+  /** True when the gauges are the placeholder set, not the live backend. */
+  sample?: boolean;
 }
