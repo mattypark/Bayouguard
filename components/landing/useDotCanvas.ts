@@ -1,9 +1,9 @@
 'use client';
 
-/* The plumbing both landing canvases share: DPR sizing, the pointer (lens on
- * hover, drag on press), theme colours that follow the light/dark toggle, and
- * a rAF loop that stops while the tab is hidden. Each canvas only supplies
- * its draw function. */
+/* Canvas plumbing for the landing: DPR sizing, the pointer (for the lens),
+ * theme colours that follow the light/dark toggle, and a rAF
+ * loop that stops while the tab is hidden. The canvas only supplies its draw
+ * function. */
 
 import { useEffect, useRef, type RefObject } from 'react';
 import { fitCanvas, readThemeColours, type Pointer, type RGB } from './lens';
@@ -15,8 +15,6 @@ export interface Frame {
   /** ms since the loop started — frozen at 0 under reduced motion. */
   t: number;
   pointer: Pointer;
-  /** Accumulated drag in px since mount. */
-  drag: { x: number; y: number };
   ink: RGB;
   accent: RGB;
 }
@@ -40,8 +38,6 @@ export function useDotCanvas(
     let { w, h } = fitCanvas(el, cv, ctx);
     let colours = readThemeColours(el);
     const pointer: Pointer = { x: -9999, y: -9999, on: false };
-    const drag = { x: 0, y: 0 };
-    let pressed: { x: number; y: number } | null = null;
     let raf = 0;
     let t = 0;
     let last = performance.now();
@@ -51,37 +47,17 @@ export function useDotCanvas(
       last = now;
       if (!reduced) t += dt;
       ctx!.clearRect(0, 0, w, h);
-      drawRef.current({ ctx: ctx!, w, h, t, pointer, drag, ...colours });
+      drawRef.current({ ctx: ctx!, w, h, t, pointer, ...colours });
       raf = requestAnimationFrame(frame);
     }
 
-    function local(e: PointerEvent) {
-      const r = cv!.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
-    }
-
-    function onDown(e: PointerEvent) {
-      pressed = local(e);
-      el!.setPointerCapture(e.pointerId);
-    }
-
     function onMove(e: PointerEvent) {
-      const p = local(e);
-      if (pressed) {
-        drag.x += p.x - pressed.x;
-        drag.y += p.y - pressed.y;
-        pressed = p;
-      }
-      // Touch drags the globe; only a real pointer gets the lens.
+      // A finger on a phone is scrolling the page, not aiming a lens.
       if (e.pointerType === 'touch') return;
-      pointer.x = p.x;
-      pointer.y = p.y;
+      const r = cv!.getBoundingClientRect();
+      pointer.x = e.clientX - r.left;
+      pointer.y = e.clientY - r.top;
       pointer.on = true;
-    }
-
-    function onUp(e: PointerEvent) {
-      pressed = null;
-      if (el!.hasPointerCapture(e.pointerId)) el!.releasePointerCapture(e.pointerId);
     }
 
     function onLeave() {
@@ -107,10 +83,7 @@ export function useDotCanvas(
     });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-    el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
     el.addEventListener('pointerleave', onLeave);
     document.addEventListener('visibilitychange', onVisibility);
     raf = requestAnimationFrame(frame);
@@ -119,10 +92,7 @@ export function useDotCanvas(
       cancelAnimationFrame(raf);
       ro.disconnect();
       mo.disconnect();
-      el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
       el.removeEventListener('pointerleave', onLeave);
       document.removeEventListener('visibilitychange', onVisibility);
     };

@@ -9,24 +9,17 @@ import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { LandingData } from '@/lib/landing';
-import FloodGlobe from './FloodGlobe';
 import TexasField from './TexasField';
 import BrandMark from './BrandMark';
-
-export type LandingVariant = 'a' | 'b';
 
 const CARD_SPOTS = ['left-[6%] top-[14%]', 'right-[6%] top-[22%]', 'left-[3%] bottom-[16%]', 'right-[4%] bottom-[10%]'];
 
 export default function Landing({
   data,
   freshness,
-  variant,
-  showVariantSwitch,
 }: {
   data: LandingData;
   freshness: string;
-  variant: LandingVariant;
-  showVariantSwitch: boolean;
 }) {
   const router = useRouter();
   const [address, setAddress] = useState('');
@@ -36,8 +29,6 @@ export default function Landing({
     const q = address.trim();
     router.push(q ? `/map?address=${encodeURIComponent(q)}` : '/map');
   };
-
-  const Hero = variant === 'b' ? TexasField : FloodGlobe;
 
   return (
     <main className="relative flex min-h-[100svh] flex-col items-center overflow-x-hidden bg-ob-bg px-4 pb-8 text-ob-text">
@@ -53,10 +44,9 @@ export default function Landing({
 
       <section className="relative mt-2 w-full max-w-[1180px]" aria-label="Every gauge in Texas">
         <div className="land-in relative mx-auto h-[min(58vh,520px)] min-h-[300px] w-full max-w-[640px]" style={{ animationDelay: '0ms' }}>
-          <Hero dots={data.dots} />
+          <TexasField dots={data.dots} />
           <p className="sr-only">
-            {data.dots.length} river and bayou gauges across Texas, drawn as dots
-            {variant === 'b' ? ' on a map of the state' : ' on a globe'}.
+            {data.dots.length} river and bayou gauges across Texas, drawn as dots on a map of the state.
           </p>
         </div>
 
@@ -80,7 +70,8 @@ export default function Landing({
       <section className="land-in flex w-full max-w-[392px] flex-col items-center text-center" style={{ animationDelay: '220ms' }}>
         <h1 className="text-[22px] font-semibold tracking-[-0.02em]">Every river gauge in Texas.</h1>
         <p className="mt-1 text-[14px] leading-relaxed text-ob-muted">
-          Live water levels on one living {variant === 'b' ? 'map' : 'globe'}. Hover to look closer.
+          Live water levels on one living map.
+          <span className="hidden sm:inline"> Hover to look closer.</span>
         </p>
         <p className="mt-3 text-[12px] text-ob-muted">{freshness}</p>
 
@@ -131,20 +122,6 @@ export default function Landing({
         <p>Congressional App Challenge 2026 · Data: USGS, Harris County Flood Warning System, Open-Meteo</p>
       </footer>
 
-      {showVariantSwitch && (
-        <nav aria-label="Landing variant (development only)" className="fixed right-3 top-3 z-50 flex gap-1 rounded-full border border-ob-border bg-ob-surface p-1 text-[11px] font-semibold shadow-panel">
-          {(['a', 'b'] as const).map((v) => (
-            <Link
-              key={v}
-              href={`/?v=${v}`}
-              aria-current={variant === v ? 'page' : undefined}
-              className={`rounded-full px-2.5 py-1 uppercase ${variant === v ? 'bg-ob-text text-ob-bg' : 'text-ob-muted'}`}
-            >
-              {v}
-            </Link>
-          ))}
-        </nav>
-      )}
     </main>
   );
 }

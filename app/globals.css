@@ -202,11 +202,6 @@ body,
 .landing-canvas {
   position: absolute;
   inset: 0;
-  touch-action: pan-y; /* a vertical swipe still scrolls the page on phones */
-  cursor: grab;
-}
-.landing-canvas:active {
-  cursor: grabbing;
 }
 .landing-canvas canvas {
   display: block;

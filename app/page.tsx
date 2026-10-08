@@ -1,4 +1,4 @@
-import Landing, { type LandingVariant } from '@/components/landing/Landing';
+import Landing from '@/components/landing/Landing';
 import { getLandingData } from '@/lib/landing';
 
 export const revalidate = 60;
@@ -13,21 +13,7 @@ function formatFreshness(iso: string | null): string {
   return `Gauges read every 5 minutes · newest reading ${time} CT`;
 }
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: { v?: string };
-}) {
+export default async function Home() {
   const data = await getLandingData();
-  // A/B: ?v=b shows the Texas dot-matrix; anything else is the globe.
-  const variant: LandingVariant = searchParams.v === 'b' ? 'b' : 'a';
-
-  return (
-    <Landing
-      data={data}
-      freshness={formatFreshness(data.latestReading)}
-      variant={variant}
-      showVariantSwitch={process.env.NODE_ENV === 'development'}
-    />
-  );
+  return <Landing data={data} freshness={formatFreshness(data.latestReading)} />;
 }

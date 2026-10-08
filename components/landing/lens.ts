@@ -1,20 +1,22 @@
-/* The lens shared by both landing canvases.
+/* The landing canvas's lens.
  *
  * Taken from the YCGlobe reference (vclense.ch/ycglobe), measured in
  * allaimodels/docs/DESIGN-REFS.md: inside a radius around the cursor each dot
  * lerps from ink toward a colour, gains alpha and gains a size step, weighted by
  * a smooth falloff — so it reads as liquid over moving points, not a spotlight.
  *
- * One change for this data: the lens also magnifies. Every Harris County gauge
- * sits inside a few pixels on a whole-Earth globe, so a lens that only
- * recoloured would light up a blob. A fisheye pushes the dots apart under the
- * cursor and the bayous become legible. */
+ * One change for this data: the lens also magnifies. The Houston gauges sit
+ * in a tight cluster, so a lens that only recoloured would light up a blob; a
+ * gentle fisheye pushes them apart under the cursor. */
 
 export type RGB = readonly [number, number, number];
 
 export const LENS_RADIUS = 170;
-/** Fisheye strength: 3 means 4× magnification at the very centre. */
-export const MAGNIFY_GLOBE = 3;
+/**
+ * Fisheye strength: 0.9 means 1.9× at the very centre. Texas already fills the
+ * stage; anything much stronger tears the state's outline.
+ */
+const MAGNIFY = 0.9;
 
 export interface Pointer {
   x: number;
@@ -34,7 +36,7 @@ export function lens(
   sx: number,
   sy: number,
   p: Pointer,
-  magnify = MAGNIFY_GLOBE,
+  magnify = MAGNIFY,
   radius = LENS_RADIUS,
 ): Lensed {
   if (!p.on) return { x: sx, y: sy, e: 0 };

@@ -10,7 +10,7 @@ import { getRainForecast } from './weather';
 import { loadGauges, normalizeTier } from './api';
 import type { Tier } from './types';
 
-/** One dot on the globe. `tier` is null for statewide gauges, which carry no flood stage. */
+/** One dot on the landing map. `tier` is null for statewide gauges, which carry no flood stage. */
 export interface LandingDot {
   lat: number;
   lng: number;

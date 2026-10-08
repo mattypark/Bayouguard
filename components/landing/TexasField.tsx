@@ -1,12 +1,12 @@
 'use client';
 
-/* Variant B — Texas as a dot matrix.
+/* The landing hero — Texas as a dot matrix.
  *
- * Where the globe puts Texas in context, this gives it the whole stage: the
- * state filled with an even grid of faint squares, every gauge at its true
- * position in solid ink, and a slow band of "rain" sweeping across from the
- * Gulf that lifts the grid as it passes. Same lens as the globe — magnify and
- * reveal each gauge's flood tier. */
+ * The state fills the stage with an even grid of faint squares, every gauge
+ * sits at its true position in solid ink, and a slow band of "rain" sweeps in
+ * from the Gulf, lifting the grid as it passes. The lens magnifies and reveals
+ * each gauge's flood tier; statewide gauges, which have no flood stage, light
+ * up in the accent. (Picked over a dotted globe in the A/B, 2026-10-08.) */
 
 import { useMemo, useRef } from 'react';
 import { TEXAS_OUTLINE } from '@/lib/geoDots';
@@ -18,9 +18,6 @@ import { hexToRgb, lens, mix, rgba, type RGB } from './lens';
 const GRID_PX = 7;
 const RAIN_PERIOD = 9_000; // ms for the band to cross the state
 const RAIN_WIDTH = 0.22; // fraction of the diagonal
-// Texas already fills the stage, so the lens only needs to tease the Houston
-// cluster apart — the globe's 4× tears the state's outline.
-const MAGNIFY = 0.9;
 
 const TIER_RGB = Object.fromEntries(
   Object.entries(TIER_COLOR).map(([k, v]) => [k, hexToRgb(v)]),
@@ -88,14 +85,14 @@ export default function TexasField({ dots }: { dots: LandingDot[] }) {
       const along = w - x + (h - y);
       const band = Math.max(0, 1 - Math.abs(along - front) / (diag * RAIN_WIDTH));
       const rain = t > 0 ? band * band : 0;
-      const l = lens(x, y, pointer, MAGNIFY);
+      const l = lens(x, y, pointer);
       const size = 2 + l.e * 1.4 + rain * 0.6;
       ctx.fillStyle = rgba(mix(ink, accent, Math.max(l.e * 0.6, rain * 0.55)), 0.13 + rain * 0.22 + l.e * 0.3);
       ctx.fillRect(l.x - size / 2, l.y - size / 2, size, size);
     }
 
     for (const g of gauges) {
-      const l = lens(toX(g.lng), toY(g.lat), pointer, MAGNIFY);
+      const l = lens(toX(g.lng), toY(g.lat), pointer);
       const lit = g.tier ? TIER_RGB[g.tier] : accent;
       const size = 2.4 + l.e * 3.2;
       ctx.fillStyle = rgba(mix(ink, lit, Math.min(1, l.e * 1.6)), 0.82);
