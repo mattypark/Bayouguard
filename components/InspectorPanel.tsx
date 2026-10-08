@@ -364,7 +364,7 @@ export default function InspectorPanel({
           <p className="text-[11px] uppercase tracking-[0.18em] text-ob-faint">
             Your location
           </p>
-          <h2 className="truncate font-serif text-xl text-ob-text" title={risk.address}>
+          <h2 className="truncate text-xl font-semibold tracking-tight text-ob-text" title={risk.address}>
             {risk.address}
           </h2>
         </div>

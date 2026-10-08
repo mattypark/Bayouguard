@@ -19,22 +19,21 @@ module.exports = {
           faint: 'rgb(var(--ob-faint-rgb) / <alpha-value>)',
           accent: 'rgb(var(--ob-accent-rgb) / <alpha-value>)',
         },
-        // Risk tiers (luminous on dark)
+        // Risk tiers — readable on cream and on near-black
         tier: {
-          low: '#34d399',
-          med: '#f5b14c',
-          high: '#ff5d5d',
-          crit: '#c084fc',
+          low: '#12a067',
+          med: '#e0930c',
+          high: '#e4432d',
+          crit: '#8b3fe0',
         },
       },
       fontFamily: {
-        serif: ['var(--font-dm-serif)', 'serif'],
         sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
         mono: ['var(--font-jbmono)', 'ui-monospace', 'monospace'],
       },
       boxShadow: {
-        glow: '0 0 0 1px rgba(76,194,255,0.25), 0 0 24px -4px rgba(76,194,255,0.35)',
-        panel: '0 24px 60px -20px rgba(0,0,0,0.7)',
+        glow: '0 0 0 3px rgb(var(--ob-accent-rgb) / 0.18)',
+        panel: '0 1px 0 rgb(var(--ob-shadow-rgb) / 0.04), 0 22px 44px -22px rgb(var(--ob-shadow-rgb) / 0.28)',
       },
     },
   },

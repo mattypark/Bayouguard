@@ -2,47 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Theme tokens (RGB triplets so Tailwind alpha utilities work) ──────────── */
+/* ── Theme tokens (RGB triplets so Tailwind alpha utilities work) ──────────────
+ * Paper and ink, one accent. Light is the default: warm cream ground, near-black
+ * ink, a saturated bayou blue for anything you can act on. Risk tiers are the
+ * only other colours on the page, so a colour always means a water level. */
 :root,
-[data-theme='dark'] {
-  --ob-bg-rgb: 10 12 16;
-  --ob-bg2-rgb: 14 17 23;
-  --ob-surface-rgb: 21 25 34;
-  --ob-surface2-rgb: 28 33 44;
-  --ob-border-rgb: 38 45 58;
-  --ob-text-rgb: 230 237 243;
-  --ob-muted-rgb: 139 151 167;
-  --ob-faint-rgb: 90 100 115;
-  --ob-accent-rgb: 76 194 255;
-
-  --ob-glow-a: rgba(76, 194, 255, 0.08);
-  --ob-glow-b: rgba(192, 132, 252, 0.05);
+[data-theme='light'] {
+  --ob-bg-rgb: 251 246 239;
+  --ob-bg2-rgb: 244 237 226;
+  --ob-surface-rgb: 255 255 255;
+  --ob-surface2-rgb: 250 246 240;
+  --ob-border-rgb: 233 224 211;
+  --ob-text-rgb: 27 24 20;
+  --ob-muted-rgb: 104 96 86;
+  --ob-faint-rgb: 150 140 128;
+  --ob-accent-rgb: 26 92 255;
+  --ob-shadow-rgb: 84 60 30;
 }
 
-[data-theme='light'] {
-  --ob-bg-rgb: 240 243 249;
-  --ob-bg2-rgb: 230 235 243;
-  --ob-surface-rgb: 255 255 255;
-  --ob-surface2-rgb: 240 243 249;
-  --ob-border-rgb: 205 214 228;
-  --ob-text-rgb: 22 30 44;
-  --ob-muted-rgb: 75 90 110;
-  --ob-faint-rgb: 120 134 154;
-  --ob-accent-rgb: 20 130 210;
-
-  --ob-glow-a: rgba(20, 130, 210, 0.1);
-  --ob-glow-b: rgba(120, 80, 220, 0.06);
+[data-theme='dark'] {
+  --ob-bg-rgb: 15 15 17;
+  --ob-bg2-rgb: 20 20 23;
+  --ob-surface-rgb: 27 27 31;
+  --ob-surface2-rgb: 33 33 38;
+  --ob-border-rgb: 48 47 52;
+  --ob-text-rgb: 242 238 230;
+  --ob-muted-rgb: 166 160 150;
+  --ob-faint-rgb: 112 108 102;
+  --ob-accent-rgb: 104 148 255;
+  --ob-shadow-rgb: 0 0 0;
 }
 
 :root {
-  --tier-low: #34d399;
-  --tier-med: #f5b14c;
-  --tier-high: #ff5d5d;
-  --tier-crit: #c084fc;
+  --tier-low: #12a067;
+  --tier-med: #e0930c;
+  --tier-high: #e4432d;
+  --tier-crit: #8b3fe0;
 
   --duration-fast: 150ms;
   --duration-normal: 320ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 html,
@@ -57,23 +57,16 @@ body {
 /* Theme transition for the chrome (not the canvas). */
 body,
 .ob-panel {
-  transition:
-    background-color var(--duration-normal) ease,
-    border-color var(--duration-normal) ease,
-    color var(--duration-normal) ease;
+  background: rgb(var(--ob-surface-rgb) / 0.94);
+  border: 1px solid rgb(var(--ob-border-rgb) / 0.8);
+  backdrop-filter: blur(12px) saturate(120%);
 }
 
-/* Ambient radial glow behind the whole app. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(1200px 700px at 50% -10%, var(--ob-glow-a), transparent 70%),
-    radial-gradient(900px 600px at 100% 110%, var(--ob-glow-b), transparent 70%),
-    linear-gradient(180deg, rgb(var(--ob-bg-rgb)) 0%, rgb(var(--ob-bg2-rgb)) 100%);
-  background-attachment: fixed;
+/* The floating-card shadow from the reference: wide, soft, warm, low. */
+.ob-float {
+  box-shadow:
+    0 1px 0 rgb(var(--ob-shadow-rgb) / 0.04),
+    0 22px 44px -22px rgb(var(--ob-shadow-rgb) / 0.28);
 }
 
 /* ── Reusable atmosphere helpers ──────────────────────────────────────────── */
