@@ -197,3 +197,54 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Landing ──────────────────────────────────────────────────────────────── */
+.landing-canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: pan-y; /* a vertical swipe still scrolls the page on phones */
+  cursor: grab;
+}
+.landing-canvas:active {
+  cursor: grabbing;
+}
+.landing-canvas canvas {
+  display: block;
+}
+
+/* Pieces assemble rather than wipe in: a short rise from a visible-enough
+ * start, staggered by inline animation-delay. */
+@keyframes land-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.land-in {
+  animation: land-in 0.9s var(--ease-out-expo) both;
+}
+
+/* Stat cards rise in, then drift. Two animations, two delays (set inline). */
+@keyframes stat-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.stat-float {
+  animation:
+    land-in 0.8s var(--ease-out-expo) both,
+    stat-bob 7s ease-in-out infinite;
+}
+
+/* Warm CARTO's cool grey toward the paper, light theme only. */
+[data-theme='light'] .leaflet-tile-pane {
+  filter: sepia(0.16) saturate(0.85) brightness(1.01);
+}
