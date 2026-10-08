@@ -132,7 +132,7 @@ export default function Landing({
       </footer>
 
       {showVariantSwitch && (
-        <nav aria-label="Landing variant (development only)" className="fixed bottom-3 left-3 z-50 flex gap-1 rounded-full border border-ob-border bg-ob-surface p-1 text-[11px] font-semibold shadow-panel">
+        <nav aria-label="Landing variant (development only)" className="fixed right-3 top-3 z-50 flex gap-1 rounded-full border border-ob-border bg-ob-surface p-1 text-[11px] font-semibold shadow-panel">
           {(['a', 'b'] as const).map((v) => (
             <Link
               key={v}
