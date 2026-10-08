@@ -66,7 +66,7 @@ interface BackendGauge {
 }
 
 // Backend tier set -> frontend Tier. SAFE/UNKNOWN collapse to LOW.
-function normalizeTier(t: string): Tier {
+export function normalizeTier(t: string): Tier {
   switch (t) {
     case 'CRITICAL': return 'CRITICAL';
     case 'HIGH':     return 'HIGH';

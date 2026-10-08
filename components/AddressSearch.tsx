@@ -7,9 +7,21 @@ import type { Suggestion } from '@/lib/geocode';
 const STORAGE_KEY = 'bayouguard_saved_address';
 const DEBOUNCE_MS = 220;
 
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-ob-faint">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function AddressSearch({
   onSearch,
+  initialValue,
 }: {
+  /** An address handed over from the landing page; searched once on mount. */
+  initialValue?: string;
   onSearch?: (
     addr: string,
     submitted: boolean,
@@ -29,9 +41,17 @@ export default function AddressSearch({
     onSearchRef.current = onSearch;
   });
 
-  // Restore saved address on mount: refresh status only, don't open the map.
+  // An address from the landing page wins over the saved one, and has already
+  // been searched server-side — so it only fills the box.
+  // Otherwise restore the saved address: refresh status only, don't open the map.
   // Reads onSearch from a ref so the empty dep array is genuinely safe.
+  const initialRef = useRef(initialValue);
   useEffect(() => {
+    if (initialRef.current) {
+      skipNextFetch.current = true;
+      setValue(initialRef.current);
+      return;
+    }
     const v = localStorage.getItem(STORAGE_KEY);
     if (v) {
       skipNextFetch.current = true;
@@ -118,11 +138,9 @@ export default function AddressSearch({
     <div ref={boxRef} className="relative mx-auto w-full max-w-2xl">
       <form
         onSubmit={submit}
-        className="ob-panel flex w-full items-center gap-2 rounded-full p-1.5 pl-5 shadow-panel focus-within:border-ob-accent/60 focus-within:shadow-glow"
+        className="ob-panel ob-float flex h-11 w-full items-center gap-1.5 rounded-full p-1 pl-4 focus-within:border-ob-accent/60 focus-within:shadow-glow"
       >
-        <span className="text-ob-faint" aria-hidden>
-          ⌖
-        </span>
+        <SearchIcon />
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -138,20 +156,20 @@ export default function AddressSearch({
             open && active >= 0 ? `address-option-${active}` : undefined
           }
           autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-ob-text outline-none placeholder:text-ob-faint"
+          className="min-w-0 flex-1 bg-transparent py-2 text-[14px] text-ob-text outline-none placeholder:text-ob-faint"
         />
         <button
           type="button"
           onClick={save}
           title={saved === value && value ? 'Saved' : 'Save address'}
           aria-label="Save address"
-          className="hidden h-10 w-10 items-center justify-center rounded-full text-ob-faint transition hover:bg-ob-surface2 hover:text-ob-accent sm:flex"
+          className="hidden h-9 w-9 items-center justify-center rounded-full text-ob-faint transition hover:bg-ob-bg2 hover:text-ob-accent sm:flex"
         >
           {saved === value && value ? '★' : '☆'}
         </button>
         <button
           type="submit"
-          className="h-10 rounded-full bg-ob-accent px-5 text-sm font-semibold text-ob-bg transition hover:brightness-110"
+          className="h-9 shrink-0 rounded-full bg-ob-accent px-4 text-[13px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
         >
           Check risk
         </button>
@@ -162,7 +180,7 @@ export default function AddressSearch({
           id="address-listbox"
           role="listbox"
           aria-label="Address suggestions"
-          className="ob-panel absolute z-50 mt-2 w-full overflow-hidden rounded-2xl py-1 text-left shadow-panel"
+          className="ob-panel ob-float absolute z-50 mt-2 w-full overflow-hidden rounded-2xl py-1 text-left"
         >
           {suggestions.map((s, i) => (
             <li
@@ -176,7 +194,7 @@ export default function AddressSearch({
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(s)}
                 className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
-                  i === active ? 'bg-ob-accent/15 text-ob-accent' : 'text-ob-muted hover:bg-ob-surface2'
+                  i === active ? 'bg-ob-accent/10 text-ob-accent' : 'text-ob-muted hover:bg-ob-bg2'
                 }`}
               >
                 <span className="text-ob-faint" aria-hidden>

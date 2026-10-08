@@ -76,7 +76,7 @@ function TierBadge({ tier }: { tier: Tier }) {
     >
       <span
         className="h-2 w-2 rounded-full"
-        style={{ backgroundColor: TIER_COLOR[tier], boxShadow: `0 0 8px ${TIER_COLOR[tier]}` }}
+        style={{ backgroundColor: TIER_COLOR[tier] }}
       />
       {TIER_LABEL[tier]}
     </span>
@@ -451,7 +451,7 @@ function PanelShell({
   switchLabel: string;
 }) {
   return (
-    <div className="ob-panel reveal flex max-h-full flex-col rounded-2xl shadow-panel">
+    <div className="ob-panel ob-float reveal flex max-h-full flex-col rounded-2xl">
       <div className="thin-scroll overflow-y-auto p-5">{children}</div>
       <div className="flex items-center gap-2 border-t border-ob-border p-3">
         <button

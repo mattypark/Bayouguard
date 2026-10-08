@@ -39,11 +39,16 @@ const REGION_BOUNDS: [[number, number], [number, number]] = [
   [38.2, -88.0], // NE
 ];
 const MAX_ZOOM = 18;
+const ESRI_CANVAS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas';
+// The grey canvas has tiles to 16; past that Leaflet upscales them.
+const CANVAS_NATIVE_ZOOM = 16;
+const ESRI_ATTRIBUTION = 'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
 
 // Regional zoom shows the gauge cluster in statewide Texas context; street zoom
 // is reserved for an explicit address search.
 const REGION_ZOOM = 7;
 const ADDRESS_ZOOM = 13;
+const GAUGE_ZOOM = 11;
 
 // Ripple pulse speed per tier — critical gauges pulse hard and fast.
 const RIPPLE_DURATION: Record<Tier, string> = {
@@ -97,6 +102,17 @@ function makeRippleIcon(tier: Tier) {
   });
 }
 
+/* Fly to a gauge picked outside the map (the leaderboard), without zooming
+ * back out if the reader is already closer than street-level context. */
+function FocusGauge({ gauge }: { gauge: GaugePoint | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!gauge) return;
+    map.flyTo([gauge.lat, gauge.lng], Math.max(map.getZoom(), GAUGE_ZOOM), { duration: 0.9 });
+  }, [gauge, map]);
+  return null;
+}
+
 function Recenter({
   center,
   zoomToCenter,
@@ -140,6 +156,7 @@ export default function FloodMap({
   selectedId,
   onSelect,
   layers,
+  focusGauge = null,
 }: {
   center: { lat: number; lng: number } | null;
   gauges: GaugePoint[];
@@ -149,21 +166,26 @@ export default function FloodMap({
   selectedId?: string | null;
   onSelect?: (sel: MapSelection | null) => void;
   layers: MapLayers;
+  /** A gauge chosen outside the map, to fly to. */
+  focusGauge?: GaugePoint | null;
 }) {
   const start: [number, number] = center ? [center.lat, center.lng] : HOUSTON;
   const startZoom = zoomToCenter && center ? ADDRESS_ZOOM : REGION_ZOOM;
-  const tileUrl =
-    mode === 'light'
-      ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-  const strokeColor = mode === 'light' ? '#0a0c10' : '#ffffff';
-  const windColor = mode === 'light' ? 'rgba(20,90,160,0.9)' : 'rgba(140,200,255,0.9)';
-  const usgsColor = mode === 'light' ? '#64748b' : '#7d93b2';
+  // Esri's keyless grey canvas, base and labels as two layers. CARTO's free
+  // basemaps now stamp "API KEY REQUIRED" over every tile.
+  const canvas = mode === 'light' ? 'World_Light_Gray' : 'World_Dark_Gray';
+  const tileBase = `${ESRI_CANVAS}/${canvas}_Base/MapServer/tile/{z}/{y}/{x}`;
+  const tileLabels = `${ESRI_CANVAS}/${canvas}_Reference/MapServer/tile/{z}/{y}/{x}`;
+  // A white keyline lifts the tier fill off cream tiles; ink marks the selection.
+  const strokeColor = mode === 'light' ? '#ffffff' : '#0f0f11';
+  const selectedStroke = mode === 'light' ? OB.text : '#ffffff';
+  const windColor = mode === 'light' ? 'rgba(26,92,255,0.7)' : 'rgba(150,180,255,0.85)';
+  const usgsColor = mode === 'light' ? '#8c8274' : '#9a9286';
   const addressIcon = useMemo(
     () =>
       mode === 'light'
-        ? makeAddressIcon('#1482d2', '#f0f3f9')
-        : makeAddressIcon(OB.accent, '#0a0c10'),
+        ? makeAddressIcon(OB.accent, OB.bg)
+        : makeAddressIcon('#6894ff', '#0f0f11'),
     [mode],
   );
   // Per-gauge icons (not per-tier) so every gauge pulses on its own phase;
@@ -208,10 +230,10 @@ export default function FloodMap({
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
         />
       ) : (
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url={tileUrl}
-        />
+        <>
+          <TileLayer key={tileBase} attribution={ESRI_ATTRIBUTION} url={tileBase} maxNativeZoom={CANVAS_NATIVE_ZOOM} />
+          <TileLayer key={tileLabels} url={tileLabels} maxNativeZoom={CANVAS_NATIVE_ZOOM} />
+        </>
       )}
 
       {/* Statewide USGS context gauges — small, neutral, non-tiered. */}
@@ -258,7 +280,7 @@ export default function FloodMap({
               center={[g.lat, g.lng]}
               radius={isSel ? 9 : 6}
               pathOptions={{
-                color: isSel ? '#ffffff' : strokeColor,
+                color: isSel ? selectedStroke : strokeColor,
                 weight: isSel ? 2.5 : 1.5,
                 fillColor: TIER_COLOR[g.tier],
                 fillOpacity: 0.9,
@@ -292,6 +314,7 @@ export default function FloodMap({
       {layers.wind && <WindLayer color={windColor} />}
 
       <ClampToRegion />
+      <FocusGauge gauge={focusGauge} />
       <Recenter
         center={center ? [center.lat, center.lng] : null}
         zoomToCenter={zoomToCenter}

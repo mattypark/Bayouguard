@@ -1,6 +1,7 @@
 'use client';
 
-/* Map layer toggles. Checkbox panel that lets the user compose their own view:
+/* Map layer toggles. A checkbox list (the rail supplies the card) that lets
+ * the user compose their own view:
  * plain risk dots, animated "tsunami" ripples, wind flow, satellite imagery,
  * and the statewide USGS context layer. Map mode only — the graph background
  * has its own visual language. */
@@ -37,8 +38,8 @@ export default function LayerControl({
   onChange: (next: MapLayers) => void;
 }) {
   return (
-    <div className="ob-panel w-48 rounded-2xl p-3 shadow-panel">
-      <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-ob-faint">
+    <div>
+      <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-ob-faint">
         Map layers
       </p>
       <ul className="flex flex-col gap-1">
@@ -52,13 +53,13 @@ export default function LayerControl({
                 aria-checked={on}
                 title={hint}
                 onClick={() => onChange({ ...layers, [key]: !on })}
-                className="group flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition hover:bg-ob-bg2/70"
+                className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-ob-bg2"
               >
                 <span
                   className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
                     on
-                      ? 'border-ob-accent bg-ob-accent/20'
-                      : 'border-ob-border bg-transparent'
+                      ? 'border-ob-accent bg-ob-accent'
+                      : 'border-ob-border bg-ob-surface'
                   }`}
                 >
                   {on && (
@@ -66,7 +67,7 @@ export default function LayerControl({
                       <path
                         d="M1.5 5.5l2.2 2.2L8.5 2.6"
                         fill="none"
-                        stroke="rgb(var(--ob-accent-rgb))"
+                        stroke="#ffffff"
                         strokeWidth="1.8"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -75,11 +76,12 @@ export default function LayerControl({
                   )}
                 </span>
                 <span
-                  className={`text-xs transition ${
+                  className={`flex flex-col text-[13px] leading-tight transition ${
                     on ? 'text-ob-text' : 'text-ob-muted'
                   }`}
                 >
                   {label}
+                  <span className="text-[11px] text-ob-faint">{hint}</span>
                 </span>
               </button>
             </li>
