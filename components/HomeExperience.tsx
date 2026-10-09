@@ -9,7 +9,8 @@
  * picked), and a first-visit tour. Searching an address refreshes the flood
  * view and focuses it; picking any gauge opens the inspector. */
 
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type L from 'leaflet';
 import dynamic from 'next/dynamic';
 import { AnimatePresence, motion } from 'framer-motion';
 import TopBar, { type Lang, type ViewMode } from './TopBar';
@@ -21,20 +22,23 @@ import InspectorPanel from './InspectorPanel';
 import MapRail from './MapRail';
 import RiskBoard from './RiskBoard';
 import Tour from './Tour';
+import MapIntro from './MapIntro';
 import { DEFAULT_LAYERS, type MapLayers } from './LayerControl';
 import { fetchFloodView } from '@/lib/client';
 import { useTheme } from '@/lib/useTheme';
 import type { FloodView, GaugePoint, Tier } from '@/lib/types';
+import { readHandoff, type Handoff } from '@/lib/dotField';
 
 // Leaflet touches window — load the map background client-only.
 const FloodMap = dynamic(() => import('./FloodMap'), {
   ssr: false,
-  loading: () => (
-    <div className="flex h-full w-full items-center justify-center bg-ob-bg2">
-      <span className="text-sm text-ob-muted">Loading map…</span>
-    </div>
-  ),
+  loading: () => <div className="h-full w-full bg-ob-bg" />,
 });
+
+/* checking — deciding (first client frame) whether we came from the landing
+ * playing   — MapIntro is melting the landing's dots into the map
+ * done      — chrome slides in; normal use */
+type IntroState = 'checking' | 'playing' | 'done';
 
 const ADDRESS_SELECTION: GraphSelection = { id: 'address', kind: 'address' };
 
@@ -59,6 +63,27 @@ export default function HomeExperience({
   const [searched, setSearched] = useState(Boolean(initialAddress && initial.center));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const [intro, setIntro] = useState<IntroState>('checking');
+  const [liveMap, setLiveMap] = useState<L.Map | null>(null);
+
+  // Before paint, so the landing's last frame is covered from the first frame.
+  // Once only: reading consumes the hand-off, and React's dev double-run of
+  // effects would otherwise find it gone and skip the intro.
+  const checked = useRef(false);
+  useLayoutEffect(() => {
+    if (checked.current) return;
+    checked.current = true;
+    const h = readHandoff(true);
+    if (h) {
+      setHandoff(h);
+      setIntro('playing');
+      return;
+    }
+    // A direct visit: let one frame paint with the chrome off-stage, so its
+    // slide-in actually transitions.
+    requestAnimationFrame(() => setIntro('done'));
+  }, []);
 
   // Memoized so the map's per-gauge ripple icons survive unrelated re-renders.
   const visible = useMemo(
@@ -104,12 +129,12 @@ export default function HomeExperience({
   const sample = Boolean(view.sample);
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-ob-bg">
+    <div className="fixed inset-0 overflow-hidden bg-ob-bg" data-chrome={intro === 'done' ? 'in' : 'out'}>
       {/* ── BACKGROUND (swappable) ──
           z-0 establishes a stacking context so Leaflet's internal panes
           (z-index 400-700) stay trapped below the chrome layers above. */}
       <div className="absolute inset-0 z-0">
-        {mode === 'map' ? (
+        {intro === 'checking' ? null : mode === 'map' ? (
           <FloodMap
             center={view.center}
             gauges={visible}
@@ -120,6 +145,8 @@ export default function HomeExperience({
             onSelect={setSelection}
             layers={layers}
             focusGauge={focus}
+            initialView={handoff ? { lat: handoff.lat, lng: handoff.lng, zoom: handoff.zoom } : null}
+            onReady={intro === 'playing' ? setLiveMap : undefined}
           />
         ) : (
           <WatershedGraph
@@ -143,6 +170,7 @@ export default function HomeExperience({
         lang={lang}
         onLang={setLang}
         search={<AddressSearch onSearch={onSearch} initialValue={initialAddress} />}
+        className="chrome chrome-top"
       />
 
       {/* Search status, just under the bar */}
@@ -161,7 +189,7 @@ export default function HomeExperience({
       </div>
 
       {/* Left rail (desktop) */}
-      <div className="pointer-events-none absolute bottom-4 left-4 top-[76px] z-40 hidden lg:flex lg:items-start">
+      <div className="chrome chrome-left chrome-d1 pointer-events-none absolute bottom-4 left-4 top-[76px] z-40 hidden lg:flex lg:items-start">
         <div className="pointer-events-auto max-h-full">
           <MapRail
             gauges={view.gauges}
@@ -177,14 +205,14 @@ export default function HomeExperience({
 
       {/* Network strip (below lg, where the rail doesn't fit) */}
       {!selection && (
-        <div className="pointer-events-none absolute bottom-16 left-3 z-40 lg:hidden">
+        <div className="chrome chrome-bottom chrome-d2 pointer-events-none absolute bottom-16 left-3 z-40 lg:hidden">
           <NetworkStats gauges={view.gauges} />
         </div>
       )}
 
       {/* Right column: leaderboard until something is picked */}
       {!selection && (
-        <div className="pointer-events-none absolute right-4 top-[76px] z-40 hidden lg:block">
+        <div className="chrome chrome-right chrome-d2 pointer-events-none absolute right-4 top-[76px] z-40 hidden lg:block">
           <div className="pointer-events-auto">
             <RiskBoard gauges={visible} sample={sample} onPick={pickGauge} />
           </div>
@@ -200,7 +228,7 @@ export default function HomeExperience({
 
       {/* Hint (bottom-center) */}
       {!selection && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">
+        <div className="chrome chrome-bottom chrome-d3 pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">
           <p className="ob-panel rounded-full px-4 py-1.5 text-center text-[11px] text-ob-muted">
             {mode === 'map'
               ? 'Drag to pan · scroll to zoom · tap a gauge to inspect'
@@ -211,7 +239,7 @@ export default function HomeExperience({
 
       {/* Inspector (right column desktop / bottom sheet mobile) */}
       <AnimatePresence>
-        {selection && (
+        {selection && intro === 'done' && (
           <motion.aside
             key="inspector"
             aria-label="Gauge inspector"
@@ -237,7 +265,13 @@ export default function HomeExperience({
         )}
       </AnimatePresence>
 
-      <Tour />
+      {/* Covers the first client frame while we decide; then the intro or nothing. */}
+      {intro === 'checking' && <div className="fixed inset-0 z-[90] bg-ob-bg" aria-hidden="true" />}
+      {intro === 'playing' && handoff && (
+        <MapIntro handoff={handoff} map={liveMap} mode={theme} onDone={() => setIntro('done')} />
+      )}
+
+      <Tour ready={intro === 'done'} />
     </div>
   );
 }

@@ -50,13 +50,14 @@ function visibleRect(target: string | null): DOMRect | null {
   return r && r.width > 0 && r.height > 0 ? r : null;
 }
 
-export default function Tour() {
+export default function Tour({ ready = true }: { ready?: boolean }) {
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [i, setI] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
 
   // Decide once, after layout, whether to run and which steps can be anchored.
   useEffect(() => {
+    if (!ready) return;
     let done = false;
     try {
       done = localStorage.getItem(STORAGE_KEY) === 'done';
@@ -68,7 +69,7 @@ export default function Tour() {
       setSteps(STEPS.filter((s) => s.target === null || visibleRect(s.target)));
     }, 900);
     return () => window.clearTimeout(id);
-  }, []);
+  }, [ready]);
 
   const step = steps?.[i] ?? null;
 

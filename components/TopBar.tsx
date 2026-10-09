@@ -21,11 +21,12 @@ interface Props {
   onLang: (l: Lang) => void;
   /** The search box, centred between the brand and the controls on wide screens. */
   search: ReactNode;
+  className?: string;
 }
 
-export default function TopBar({ mode, onMode, theme, onToggleTheme, lang, onLang, search }: Props) {
+export default function TopBar({ mode, onMode, theme, onToggleTheme, lang, onLang, search, className = '' }: Props) {
   return (
-    <header className="pointer-events-none absolute inset-x-0 top-0 z-[70]">
+    <header className={`pointer-events-none absolute inset-x-0 top-0 z-[70] ${className}`}>
       {/* One search instance: its own row on phones, centred in the bar from md up. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 pt-3 md:flex-nowrap md:px-4">
         <Link

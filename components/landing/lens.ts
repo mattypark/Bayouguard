@@ -9,7 +9,7 @@
  * in a tight cluster, so a lens that only recoloured would light up a blob; a
  * gentle fisheye pushes them apart under the cursor. */
 
-export type RGB = readonly [number, number, number];
+import type { RGB } from '@/lib/dotField';
 
 export const LENS_RADIUS = 170;
 /**
@@ -51,19 +51,6 @@ export function lens(
   const scale = t > 0.0001 ? tm / t : magnify + 1;
   const k = 1 - t;
   return { x: p.x + dx * scale, y: p.y + dy * scale, e: k * k * k };
-}
-
-export function mix(a: RGB, b: RGB, k: number): RGB {
-  return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
-}
-
-export function rgba(c: RGB, alpha: number): string {
-  return `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${alpha.toFixed(3)})`;
-}
-
-export function hexToRgb(hex: string): RGB {
-  const n = parseInt(hex.replace('#', ''), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
 /** Ink and accent from the live theme — the canvas cannot read Tailwind classes. */

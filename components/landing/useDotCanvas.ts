@@ -6,7 +6,8 @@
  * function. */
 
 import { useEffect, useRef, type RefObject } from 'react';
-import { fitCanvas, readThemeColours, type Pointer, type RGB } from './lens';
+import type { RGB } from '@/lib/dotField';
+import { fitCanvas, readThemeColours, type Pointer } from './lens';
 
 export interface Frame {
   ctx: CanvasRenderingContext2D;
@@ -14,6 +15,7 @@ export interface Frame {
   h: number;
   /** ms since the loop started — frozen at 0 under reduced motion. */
   t: number;
+  reduced: boolean;
   pointer: Pointer;
   ink: RGB;
   accent: RGB;
@@ -47,7 +49,7 @@ export function useDotCanvas(
       last = now;
       if (!reduced) t += dt;
       ctx!.clearRect(0, 0, w, h);
-      drawRef.current({ ctx: ctx!, w, h, t, pointer, ...colours });
+      drawRef.current({ ctx: ctx!, w, h, t, reduced, pointer, ...colours });
       raf = requestAnimationFrame(frame);
     }
 

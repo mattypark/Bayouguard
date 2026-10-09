@@ -35,7 +35,10 @@ export default function AddressSearch({
   const [active, setActive] = useState(-1);
 
   const boxRef = useRef<HTMLDivElement>(null);
-  const skipNextFetch = useRef(false); // suppress fetch right after a pick/restore
+  const skipNextFetch = useRef(false); // suppress fetch right after a pick
+  // Suggestions are only for someone typing — never for a value we restored
+  // or were handed (React's dev double-run of effects defeats a skip flag).
+  const typed = useRef(false);
   const onSearchRef = useRef(onSearch); // keep the mount effect off a stale closure
   useEffect(() => {
     onSearchRef.current = onSearch;
@@ -63,7 +66,7 @@ export default function AddressSearch({
 
   // Debounced type-ahead. Aborts the in-flight request on each keystroke.
   useEffect(() => {
-    if (skipNextFetch.current) {
+    if (skipNextFetch.current || !typed.current) {
       skipNextFetch.current = false;
       return;
     }
@@ -75,7 +78,9 @@ export default function AddressSearch({
     }
     const controller = new AbortController();
     const id = setTimeout(async () => {
-      const results = await fetchSuggestions(q, controller.signal);
+      const found = await fetchSuggestions(q, controller.signal);
+      // The geocoder can return the same place more than once.
+      const results = found.filter((r, i) => found.findIndex((o) => o.label === r.label) === i);
       setSuggestions(results);
       setOpen(results.length > 0);
       setActive(-1);
@@ -143,7 +148,10 @@ export default function AddressSearch({
         <SearchIcon />
         <input
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            typed.current = true;
+            setValue(e.target.value);
+          }}
           onKeyDown={onKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           placeholder="Enter a Texas address…"

@@ -9,10 +9,18 @@ export const metadata: Metadata = {
 export default async function MapPage({
   searchParams,
 }: {
-  searchParams: { address?: string };
+  searchParams: { address?: string; lat?: string; lng?: string };
 }) {
   const address = searchParams.address?.trim().slice(0, 200) || undefined;
-  const initial = await getFloodView(address);
+  // The landing geocodes before it zooms; reuse its coordinates so the map
+  // opens exactly where the dots flew.
+  const lat = Number(searchParams.lat);
+  const lng = Number(searchParams.lng);
+  const coords =
+    address && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+      ? { lat, lng }
+      : undefined;
+  const initial = await getFloodView(address, coords);
 
   return (
     <main className="h-full">
