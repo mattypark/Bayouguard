@@ -1,8 +1,10 @@
 'use client';
 
-/* Interactive Leaflet map. Clamped to Texas plus its neighbors (enough margin
- * to see what's coming, never the whole world — minZoom is computed from the
- * bounds so even ultrawide windows can't zoom past the region). Composable
+/* Interactive Leaflet map of Texas, and only Texas: panning is clamped to the
+ * state, minZoom is computed from its bounds so even ultrawide windows can't
+ * zoom past it, and everything outside the border is masked to the page's
+ * paper colour. Zoom stops where the basemap's tiles stop (16), so labels are
+ * never stretched into blurry giants. Composable
  * layers controlled by the LayerControl checkboxes: risk-tier gauge dots,
  * "tsunami" ripple pulses, animated wind flow, satellite imagery, and the
  * statewide USGS context network. Loaded client-only (Leaflet touches window). */
@@ -13,6 +15,8 @@ import {
   TileLayer,
   CircleMarker,
   Marker,
+  Pane,
+  Polygon,
   Tooltip,
   useMap,
 } from 'react-leaflet';
@@ -21,6 +25,7 @@ import 'leaflet/dist/leaflet.css';
 import type { GaugePoint, Tier } from '@/lib/types';
 import type { UsgsGauge } from '@/lib/usgs';
 import { TIER_COLOR, OB, type Mode } from '@/lib/theme';
+import { TEXAS_RINGS } from '@/lib/geoDots';
 import type { MapLayers } from './LayerControl';
 import WindLayer from './WindLayer';
 
@@ -32,16 +37,22 @@ export interface MapSelection {
 
 const HOUSTON: [number, number] = [29.7604, -95.3698];
 
-// Texas plus a margin of its neighbors (OK, NM, AR, LA, north Mexico, gulf) so
-// incoming weather is visible, but the map can never show the whole country.
+// Texas's extent with a sliver of margin, so the border isn't flush with the
+// screen edge at the widest zoom.
 const REGION_BOUNDS: [[number, number], [number, number]] = [
-  [24.2, -108.5], // SW
-  [38.2, -88.0], // NE
+  [25.4, -107.1], // SW
+  [36.9, -93.1], // NE
 ];
-const MAX_ZOOM = 18;
+// The grey canvas basemap has tiles to 16. Past that Leaflet stretches them
+// and the labels turn into blurred giants, so the map stops here.
+const MAX_ZOOM = 16;
 const ESRI_CANVAS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas';
-// The grey canvas has tiles to 16; past that Leaflet upscales them.
-const CANVAS_NATIVE_ZOOM = 16;
+const CANVAS_NATIVE_ZOOM = MAX_ZOOM;
+
+const TEXAS_LINES = TEXAS_RINGS.map((ring) => ring.map(([lat, lng]) => [lat, lng] as [number, number]));
+// How far past the viewport the mask's outer edge reaches, in viewports — enough
+// that a pan or a one-level zoom-out never shows its edge before it's redrawn.
+const MASK_PAD = 1.5;
 const ESRI_ATTRIBUTION = 'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
 
 // Regional zoom shows the gauge cluster in statewide Texas context; street zoom
@@ -113,6 +124,72 @@ function FocusGauge({ gauge }: { gauge: GaugePoint | null }) {
   return null;
 }
 
+/* Hands the map out once it's laid out and its first tiles are in (or after a
+ * short wait), so the intro can melt the dots into a map that's really there. */
+/* Everything that isn't Texas, as a polygon with every Texas ring cut out of
+ * it. The outer ring follows the viewport instead of spanning the world: at
+ * street zoom a world-sized ring is millions of pixels across and the browser
+ * gives up drawing it — the whole map went blank. noClip keeps Leaflet from
+ * clipping the holes away once you're zoomed inside Texas. */
+function TexasMask({ fill }: { fill: string }) {
+  const map = useMap();
+  const [outer, setOuter] = useState<Array<[number, number]>>(() => viewRing(map));
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setOuter(viewRing(map)));
+    };
+    map.on('move zoomend resize', update);
+    return () => {
+      cancelAnimationFrame(raf);
+      map.off('move zoomend resize', update);
+    };
+  }, [map]);
+  return (
+    <Polygon
+      positions={[outer, ...TEXAS_LINES]}
+      interactive={false}
+      noClip
+      pathOptions={{ stroke: false, fillColor: fill, fillOpacity: 1 }}
+    />
+  );
+}
+
+function viewRing(map: L.Map): Array<[number, number]> {
+  const b = map.getBounds().pad(MASK_PAD);
+  return [
+    [b.getSouth(), b.getWest()],
+    [b.getNorth(), b.getWest()],
+    [b.getNorth(), b.getEast()],
+    [b.getSouth(), b.getEast()],
+  ];
+}
+
+function ReadyProbe({ onReady }: { onReady?: (map: L.Map) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!onReady) return;
+    let fired = false;
+    const fire = () => {
+      if (fired) return;
+      fired = true;
+      onReady(map);
+    };
+    const timer = window.setTimeout(fire, 1400);
+    map.whenReady(() => {
+      let tiles: L.TileLayer | null = null;
+      map.eachLayer((layer) => {
+        if (!tiles && layer instanceof L.TileLayer) tiles = layer;
+      });
+      if (tiles) (tiles as L.TileLayer).once('load', fire);
+      else fire();
+    });
+    return () => window.clearTimeout(timer);
+  }, [map, onReady]);
+  return null;
+}
+
 function Recenter({
   center,
   zoomToCenter,
@@ -130,11 +207,18 @@ function Recenter({
 /* maxBounds only clamps panning — a wide window at a fixed minZoom can still
  * see far past the region. Recompute minZoom from the bounds so the viewport
  * is never larger than Texas-plus-margin, at any window size. */
-function ClampToRegion() {
+function ClampToRegion({ fitOnStart }: { fitOnStart: boolean }) {
   const map = useMap();
+  // A plain visit opens on the whole state.
+  useEffect(() => {
+    if (fitOnStart) map.fitBounds(REGION_BOUNDS, { animate: false });
+    // Only on mount — later searches move the map themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
   useEffect(() => {
     const apply = () => {
-      const z = map.getBoundsZoom(REGION_BOUNDS, true);
+      // Zoomed out as far as the whole state, no further — the mask covers the rest.
+      const z = map.getBoundsZoom(REGION_BOUNDS, false);
       map.setMinZoom(z);
       if (map.getZoom() < z) map.setZoom(z);
     };
@@ -157,6 +241,8 @@ export default function FloodMap({
   onSelect,
   layers,
   focusGauge = null,
+  initialView,
+  onReady,
 }: {
   center: { lat: number; lng: number } | null;
   gauges: GaugePoint[];
@@ -168,9 +254,23 @@ export default function FloodMap({
   layers: MapLayers;
   /** A gauge chosen outside the map, to fly to. */
   focusGauge?: GaugePoint | null;
+  /** Where to open — set when arriving from the landing's zoom. */
+  initialView?: { lat: number; lng: number; zoom: number } | null;
+  /** Called once the map is laid out and its first tiles have loaded. */
+  onReady?: (map: L.Map) => void;
 }) {
-  const start: [number, number] = center ? [center.lat, center.lng] : HOUSTON;
-  const startZoom = zoomToCenter && center ? ADDRESS_ZOOM : REGION_ZOOM;
+  const start: [number, number] = initialView
+    ? [initialView.lat, initialView.lng]
+    : center
+      ? [center.lat, center.lng]
+      : HOUSTON;
+  const startZoom = initialView
+    ? initialView.zoom
+    : zoomToCenter && center
+      ? ADDRESS_ZOOM
+      : REGION_ZOOM;
+  const maskColor = mode === 'light' ? OB.bg : '#0f0f11';
+  const borderColor = mode === 'light' ? 'rgba(27,24,20,0.55)' : 'rgba(242,238,230,0.5)';
   // Esri's keyless grey canvas, base and labels as two layers. CARTO's free
   // basemaps now stamp "API KEY REQUIRED" over every tile.
   const canvas = mode === 'light' ? 'World_Light_Gray' : 'World_Dark_Gray';
@@ -313,7 +413,18 @@ export default function FloodMap({
 
       {layers.wind && <WindLayer color={windColor} />}
 
-      <ClampToRegion />
+      {/* Above the tiles, below the gauges: paper over everything outside Texas. */}
+      <Pane name="not-texas" style={{ zIndex: 350 }}>
+        <TexasMask fill={maskColor} />
+        <Polygon
+          positions={TEXAS_LINES}
+          interactive={false}
+          pathOptions={{ color: borderColor, weight: 1.2, fill: false }}
+        />
+      </Pane>
+
+      <ClampToRegion fitOnStart={!initialView && !(zoomToCenter && center)} />
+      <ReadyProbe onReady={onReady} />
       <FocusGauge gauge={focusGauge} />
       <Recenter
         center={center ? [center.lat, center.lng] : null}

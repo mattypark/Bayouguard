@@ -11,11 +11,16 @@
 
 import { useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
+import { inTexas } from '@/lib/dotField';
 import type { WindField } from '@/lib/wind';
 
 const PARTICLE_COUNT = 550;
 const MAX_AGE = 140; // frames before a particle respawns
-const SPEED = 0.0025; // degrees per frame per (m/s) — tuned visually
+const SPEED = 0.0025; // degrees per frame per (m/s) at REF_ZOOM — tuned visually
+// Speed is in degrees, so a fixed value streaks across the whole screen once
+// you zoom in. Scaling it by zoom keeps every trail the same length in pixels.
+const REF_ZOOM = 7;
+const SPAWN_TRIES = 8;
 const TRAIL_FADE = 0.93; // per-frame alpha multiplier on existing trails
 
 interface Particle {
@@ -67,13 +72,17 @@ export default function WindLayer({ color }: { color: string }) {
     let stopped = false;
     const particles: Particle[] = [];
 
+    // Wind only blows over Texas — the rest of the map is masked paper.
     const spawn = (): Particle => {
       const b = map.getBounds().pad(0.05);
-      return {
-        lat: b.getSouth() + Math.random() * (b.getNorth() - b.getSouth()),
-        lng: b.getWest() + Math.random() * (b.getEast() - b.getWest()),
-        age: Math.floor(Math.random() * MAX_AGE),
-      };
+      let lat = 0;
+      let lng = 0;
+      for (let i = 0; i < SPAWN_TRIES; i++) {
+        lat = b.getSouth() + Math.random() * (b.getNorth() - b.getSouth());
+        lng = b.getWest() + Math.random() * (b.getEast() - b.getWest());
+        if (inTexas(lat, lng)) break;
+      }
+      return { lat, lng, age: Math.floor(Math.random() * MAX_AGE) };
     };
 
     const resize = () => {
@@ -113,22 +122,28 @@ export default function WindLayer({ color }: { color: string }) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.1;
       ctx.lineCap = 'round';
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.4;
 
       const bounds = map.getBounds().pad(0.08);
+      const step = SPEED * 2 ** (REF_ZOOM - map.getZoom());
       for (let k = 0; k < particles.length; k++) {
         const p = particles[k];
         const [uu, vv] = bilinear(field, p.lat, p.lng);
         const speed = Math.hypot(uu, vv);
         p.age++;
-        if (p.age > MAX_AGE || speed < 0.05 || !bounds.contains([p.lat, p.lng])) {
+        if (
+          p.age > MAX_AGE ||
+          speed < 0.05 ||
+          !bounds.contains([p.lat, p.lng]) ||
+          !inTexas(p.lat, p.lng)
+        ) {
           particles[k] = spawn();
           continue;
         }
 
         const from = map.latLngToContainerPoint([p.lat, p.lng]);
-        p.lat += vv * SPEED;
-        p.lng += (uu * SPEED) / Math.max(0.2, Math.cos((p.lat * Math.PI) / 180));
+        p.lat += vv * step;
+        p.lng += (uu * step) / Math.max(0.2, Math.cos((p.lat * Math.PI) / 180));
         const to = map.latLngToContainerPoint([p.lat, p.lng]);
 
         ctx.beginPath();
