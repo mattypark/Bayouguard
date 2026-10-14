@@ -24,7 +24,7 @@ const TEAM: Array<{ name: string; role: MsgKey }> = [
   { name: 'Carlos', role: 'about.role.carlos' },
 ];
 
-const SCHOOL = '{{SCHOOL}}';
+const SCHOOL = 'Kerr High School';
 
 // Harvey made landfall Aug 25, 2017; the banner runs that week each year.
 function isHarveyWeek(now: Date): boolean {

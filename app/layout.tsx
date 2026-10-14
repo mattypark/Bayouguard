@@ -27,11 +27,15 @@ const jbMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  // Link previews must point at the site that's actually serving them:
+  // Vercel tells each deployment its own production domain.
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL ??
       (process.env.VERCEL_ENV === 'preview' && process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
-        : 'https://bayouguard.vercel.app'),
+        : process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : 'https://bayouguard.vercel.app'),
   ),
   title: 'BayouGuard — Texas floodwater, mapped',
   openGraph: { images: [{ url: '/api/og', width: 1200, height: 630 }] },
