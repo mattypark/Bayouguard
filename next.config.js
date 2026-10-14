@@ -2,6 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // No next/image anywhere; keep the image optimizer endpoint out of play.
+  images: { unoptimized: true },
   // Lets a dev server and a production build coexist (NEXT_DIST_DIR=.next-dev).
   distDir: process.env.NEXT_DIST_DIR || '.next',
   async headers() {
