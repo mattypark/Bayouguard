@@ -3,44 +3,74 @@
 @tailwind utilities;
 
 /* ── Theme tokens (RGB triplets so Tailwind alpha utilities work) ──────────────
- * Paper and ink, one accent. Light is the default: warm cream ground, near-black
- * ink, a saturated bayou blue for anything you can act on. Risk tiers are the
- * only other colours on the page, so a colour always means a water level. */
+ * Clear Sky: sky-white ground, white cards on 1px steel borders, midnight
+ * text, federal blue for anything you act on, teal for anything about water.
+ * Risk tiers are the only other colours. Light is the default; dark is deep
+ * navy, retuned rather than inverted. `faint` fails AA as text, so it is for
+ * rules and decoration only — secondary text uses `muted`. */
 :root,
 [data-theme='light'] {
-  --ob-bg-rgb: 251 246 239;
-  --ob-bg2-rgb: 244 237 226;
+  --ob-bg-rgb: 240 245 255;
+  --ob-bg2-rgb: 226 236 255;
   --ob-surface-rgb: 255 255 255;
-  --ob-surface2-rgb: 250 246 240;
-  --ob-border-rgb: 233 224 211;
-  --ob-text-rgb: 27 24 20;
-  --ob-muted-rgb: 104 96 86;
-  --ob-faint-rgb: 150 140 128;
-  --ob-accent-rgb: 26 92 255;
-  --ob-shadow-rgb: 84 60 30;
+  --ob-surface2-rgb: 247 250 255;
+  --ob-border-rgb: 205 216 237;
+  --ob-text-rgb: 26 26 46;
+  --ob-muted-rgb: 74 111 165;
+  --ob-faint-rgb: 128 153 188;
+  --ob-accent-rgb: 26 68 128;
+  --ob-water-rgb: 0 147 154;
+  --ob-onaccent-rgb: 255 255 255;
+  --ob-panel-alpha: 1;
+
+  /* Tier fills (dots, bars) and tier ink (small text). They differ only where
+   * the fill can't hold 4.5:1 as text — the MEDIUM orange. */
+  --tier-low-rgb: 27 94 32;
+  --tier-med-rgb: 230 81 0;
+  --tier-high-rgb: 183 28 28;
+  --tier-crit-rgb: 74 20 140;
+  --tier-low-ink: #1b5e20;
+  --tier-med-ink: #b33f00;
+  --tier-high-ink: #b71c1c;
+  --tier-crit-ink: #4a148c;
+  --tier-low-tint: #e8f5e9;
+  --tier-med-tint: #fff3e0;
+  --tier-high-tint: #ffebee;
+  --tier-crit-tint: #f3e5f5;
 }
 
 [data-theme='dark'] {
-  --ob-bg-rgb: 15 15 17;
-  --ob-bg2-rgb: 20 20 23;
-  --ob-surface-rgb: 27 27 31;
-  --ob-surface2-rgb: 33 33 38;
-  --ob-border-rgb: 48 47 52;
-  --ob-text-rgb: 242 238 230;
-  --ob-muted-rgb: 166 160 150;
-  --ob-faint-rgb: 112 108 102;
-  --ob-accent-rgb: 104 148 255;
-  --ob-shadow-rgb: 0 0 0;
+  --ob-bg-rgb: 11 20 38;
+  --ob-bg2-rgb: 15 27 51;
+  --ob-surface-rgb: 20 33 61;
+  --ob-surface2-rgb: 26 42 74;
+  --ob-border-rgb: 38 56 92;
+  --ob-text-rgb: 232 238 248;
+  --ob-muted-rgb: 157 178 214;
+  --ob-faint-rgb: 107 130 168;
+  --ob-accent-rgb: 111 163 255;
+  --ob-water-rgb: 60 200 207;
+  /* Light text fails on the brighter dark-mode accent; navy holds 7:1. */
+  --ob-onaccent-rgb: 11 20 38;
+  --ob-panel-alpha: 0.9;
+
+  --tier-low-rgb: 52 211 153;
+  --tier-med-rgb: 245 177 76;
+  --tier-high-rgb: 255 93 93;
+  --tier-crit-rgb: 192 132 252;
+  --tier-low-ink: #34d399;
+  --tier-med-ink: #f5b14c;
+  --tier-high-ink: #ff5d5d;
+  --tier-crit-ink: #c084fc;
+  --tier-low-tint: rgba(52, 211, 153, 0.14);
+  --tier-med-tint: rgba(245, 177, 76, 0.14);
+  --tier-high-tint: rgba(255, 93, 93, 0.14);
+  --tier-crit-tint: rgba(192, 132, 252, 0.16);
 }
 
 :root {
-  --tier-low: #12a067;
-  --tier-med: #e0930c;
-  --tier-high: #e4432d;
-  --tier-crit: #8b3fe0;
-
   --duration-fast: 150ms;
-  --duration-normal: 320ms;
+  --duration-normal: 240ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
@@ -54,30 +84,24 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Theme transition for the chrome (not the canvas). */
-body,
+/* Floating panels: solid white in light (legible over the map), a touch of
+ * transparency in dark. Flat — one soft shadow, no blur, no gradient. */
 .ob-panel {
-  background: rgb(var(--ob-surface-rgb) / 0.94);
-  border: 1px solid rgb(var(--ob-border-rgb) / 0.8);
-  backdrop-filter: blur(12px) saturate(120%);
-}
-
-/* The floating-card shadow from the reference: wide, soft, warm, low. */
-.ob-float {
-  box-shadow:
-    0 1px 0 rgb(var(--ob-shadow-rgb) / 0.04),
-    0 22px 44px -22px rgb(var(--ob-shadow-rgb) / 0.28);
-}
-
-/* ── Reusable atmosphere helpers ──────────────────────────────────────────── */
-.ob-panel {
-  background: linear-gradient(
-    180deg,
-    rgb(var(--ob-surface2-rgb) / 0.85),
-    rgb(var(--ob-surface-rgb) / 0.85)
-  );
+  background: rgb(var(--ob-surface-rgb) / var(--ob-panel-alpha));
   border: 1px solid rgb(var(--ob-border-rgb));
-  backdrop-filter: blur(14px) saturate(120%);
+}
+
+.ob-float {
+  box-shadow: 0 8px 24px -12px rgba(26, 68, 128, 0.18);
+}
+[data-theme='dark'] .ob-float {
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* Visible keyboard focus everywhere, in the water colour. */
+:focus-visible {
+  outline: 2px solid rgb(var(--ob-water-rgb));
+  outline-offset: 2px;
 }
 
 .ob-hairline {
@@ -105,8 +129,18 @@ body,
     transform: translateY(0);
   }
 }
+/* The risk arc draws in once from empty to its score. */
+@keyframes arc-sweep {
+  from {
+    stroke-dasharray: 0 1;
+  }
+}
+.arc-sweep {
+  animation: arc-sweep 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .reveal {
-  animation: ob-fade-up 0.5s var(--ease-out-expo) both;
+  animation: ob-fade-up 0.25s ease-out both;
 }
 
 @keyframes ob-spin {
@@ -143,18 +177,48 @@ body,
   font-family: inherit;
 }
 .leaflet-popup-content-wrapper,
-.leaflet-popup-tip {
-  background: rgb(var(--ob-surface2-rgb)) !important;
+.leaflet-popup-tip,
+.leaflet-tooltip {
+  background: rgb(var(--ob-surface-rgb)) !important;
   color: rgb(var(--ob-text-rgb)) !important;
-  border: 1px solid rgb(var(--ob-border-rgb));
+  border: 1px solid rgb(var(--ob-border-rgb)) !important;
+  box-shadow: 0 8px 24px -12px rgba(26, 68, 128, 0.18) !important;
+}
+.leaflet-popup-content-wrapper,
+.leaflet-tooltip {
+  border-radius: 8px !important;
+}
+.leaflet-tooltip {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: 4px 8px;
+}
+.leaflet-tooltip-top::before {
+  border-top-color: rgb(var(--ob-border-rgb)) !important;
+}
+.leaflet-tooltip-bottom::before {
+  border-bottom-color: rgb(var(--ob-border-rgb)) !important;
 }
 .leaflet-popup-content {
   margin: 12px 14px;
-  font-size: 13px;
+  font-size: 0.875rem;
+}
+/* Esri's dark canvas is neutral grey; pull it toward the navy panels. */
+[data-theme='dark'] .tiles-base {
+  filter: sepia(1) hue-rotate(180deg) saturate(1.8) brightness(0.62) contrast(1.05);
+}
+.leaflet-labels-pane {
+  pointer-events: none;
+  transition: opacity 0.2s ease-out;
+}
+.labels-hidden .leaflet-labels-pane {
+  opacity: 0;
+  transition-duration: 0s;
 }
 .leaflet-control-attribution {
-  background: rgb(var(--ob-bg-rgb) / 0.7) !important;
-  color: rgb(var(--ob-faint-rgb)) !important;
+  background: rgb(var(--ob-surface-rgb) / 0.85) !important;
+  color: rgb(var(--ob-muted-rgb)) !important;
+  font-size: 0.6875rem;
 }
 .leaflet-control-attribution a {
   color: rgb(var(--ob-muted-rgb)) !important;
@@ -198,89 +262,6 @@ body,
   }
 }
 
-/* ── Landing ──────────────────────────────────────────────────────────────── */
-.landing-canvas {
-  position: absolute;
-  inset: 0;
-}
-.landing-canvas canvas {
-  display: block;
-}
-
-/* Pieces assemble rather than wipe in: a short rise from a visible-enough
- * start, staggered by inline animation-delay. */
-@keyframes land-in {
-  from {
-    opacity: 0;
-    transform: translateY(14px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-.land-in {
-  animation: land-in 0.9s var(--ease-out-expo) both;
-}
-
-/* Stat cards rise in, then drift. Two animations, two delays (set inline). */
-@keyframes stat-bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-6px);
-  }
-}
-.stat-float {
-  animation:
-    land-in 0.8s var(--ease-out-expo) both,
-    stat-bob 7s ease-in-out infinite;
-}
-
-/* Warm CARTO's cool grey toward the paper, light theme only. */
-[data-theme='light'] .leaflet-tile-pane {
-  filter: sepia(0.16) saturate(0.85) brightness(1.01);
-}
-
-/* Leaving the landing: everything but the dots steps aside while the field
- * zooms (ZoomTransition draws the dots on its own canvas). Keyframes, not
- * transitions — the entrance animations hold their end state with fill-mode
- * both, which would override a transition. */
-@keyframes leave-up {
-  to {
-    opacity: 0;
-    transform: translateY(-24px);
-  }
-}
-@keyframes leave-down {
-  to {
-    opacity: 0;
-    transform: translateY(32px);
-  }
-}
-@keyframes leave-out {
-  to {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-}
-.is-leaving .leave-up,
-.is-leaving .leave-down,
-.is-leaving .leave-out {
-  pointer-events: none;
-}
-.is-leaving .leave-up {
-  animation: leave-up 0.5s var(--ease-out-quart) forwards;
-}
-.is-leaving .leave-down {
-  animation: leave-down 0.5s var(--ease-out-quart) forwards;
-}
-.is-leaving .leave-out {
-  animation: leave-out 0.45s var(--ease-out-quart) forwards;
-}
-
 /* Only say "loading" if it's actually taking a while. */
 @keyframes fade-in {
   from {
@@ -292,37 +273,4 @@ body,
 }
 .fade-in-late {
   animation: fade-in 0.4s ease 0.7s both;
-}
-
-/* Map chrome entrance: held off-stage while the intro plays (and for the
- * first frame of a direct visit), then each group slides in from its edge. */
-.chrome {
-  transition:
-    opacity 0.55s var(--ease-out-expo),
-    transform 0.75s var(--ease-out-expo);
-}
-.chrome-d1 {
-  transition-delay: 70ms;
-}
-.chrome-d2 {
-  transition-delay: 140ms;
-}
-.chrome-d3 {
-  transition-delay: 240ms;
-}
-[data-chrome='out'] .chrome {
-  opacity: 0;
-  pointer-events: none;
-}
-[data-chrome='out'] .chrome-top {
-  transform: translateY(-18px);
-}
-[data-chrome='out'] .chrome-left {
-  transform: translateX(-28px);
-}
-[data-chrome='out'] .chrome-right {
-  transform: translateX(28px);
-}
-[data-chrome='out'] .chrome-bottom {
-  transform: translateY(18px);
 }

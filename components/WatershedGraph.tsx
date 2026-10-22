@@ -13,9 +13,10 @@
 
 import { useEffect, useRef } from 'react';
 import { buildGraph, ForceSim, projectGeo, type Graph } from '@/lib/graph';
-import { TIER_COLOR, TIER_PULSE, PALETTE, type Mode } from '@/lib/theme';
+import { TIER_HEX, TIER_PULSE, PALETTE, type Mode } from '@/lib/theme';
 import { HOUSTON_CITIES, HOUSTON_OUTLINE } from '@/lib/geoFeatures';
 import type { GaugePoint } from '@/lib/types';
+import { useI18n } from '@/lib/i18n';
 
 export interface GraphSelection {
   id: string;
@@ -31,6 +32,7 @@ interface Props {
   active: boolean; // false when another view (e.g. the map) is on top
   selectedId: string | null;
   onSelect: (sel: GraphSelection | null) => void;
+  onSwitchToMap?: () => void;
 }
 
 interface Camera {
@@ -77,7 +79,9 @@ export default function WatershedGraph({
   active,
   selectedId,
   onSelect,
+  onSwitchToMap,
 }: Props) {
+  const { t } = useI18n();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -287,7 +291,7 @@ export default function WatershedGraph({
         const node = nodes[i];
         const p = worldToScreen(node.x, node.y);
         const isAddr = node.kind === 'address';
-        const color = isAddr ? pal.edgeAccent : TIER_COLOR[node.tier];
+        const color = isAddr ? pal.edgeAccent : TIER_HEX[modeRef.current][node.tier];
         const isSel = sel === node.id;
         const isHover = hover === i;
 
@@ -301,11 +305,14 @@ export default function WatershedGraph({
         const baseR = node.r * cam.scale;
         const r = Math.max(2, baseR + pulse * baseR * 0.35);
 
-        const glow = glowFor(color);
-        const glowR = r * (isAddr ? 7 : 5) * (1 + pulse * 0.25);
-        ctx.globalAlpha = (isAddr ? 0.5 : 0.32) + pulse * 0.18 + (isSel ? 0.2 : 0);
-        ctx.drawImage(glow, p.x - glowR, p.y - glowR, glowR * 2, glowR * 2);
-        ctx.globalAlpha = 1;
+        // Clear Sky is flat; the halo only helps legibility on the dark ground.
+        if (modeRef.current === 'dark') {
+          const glow = glowFor(color);
+          const glowR = r * (isAddr ? 7 : 5) * (1 + pulse * 0.25);
+          ctx.globalAlpha = (isAddr ? 0.5 : 0.32) + pulse * 0.18 + (isSel ? 0.2 : 0);
+          ctx.drawImage(glow, p.x - glowR, p.y - glowR, glowR * 2, glowR * 2);
+          ctx.globalAlpha = 1;
+        }
 
         ctx.beginPath();
         ctx.fillStyle = color;
@@ -524,9 +531,26 @@ export default function WatershedGraph({
         ref={canvasRef}
         tabIndex={0}
         role="application"
-        aria-label="Houston watershed flood network. Drag to pan, scroll to zoom, arrow keys to cycle gauges, Enter to inspect."
+        aria-label={t('graph.aria')}
         className="block h-full w-full outline-none focus-visible:ring-2 focus-visible:ring-ob-accent/60"
       />
+      {gauges.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center p-6">
+          <div className="ob-panel ob-float max-w-xs rounded-xl p-5 text-center">
+            <p className="text-[0.9375rem] font-semibold text-ob-text">{t('graph.empty.title')}</p>
+            <p className="mt-1 text-[0.8125rem] leading-relaxed text-ob-muted">{t('graph.empty.body')}</p>
+            {onSwitchToMap && (
+              <button
+                type="button"
+                onClick={onSwitchToMap}
+                className="mt-4 h-11 rounded-lg bg-ob-accent px-4 text-[0.875rem] font-semibold text-ob-onaccent"
+              >
+                {t('graph.empty.action')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

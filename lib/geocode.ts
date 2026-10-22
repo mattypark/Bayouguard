@@ -1,6 +1,7 @@
 /* Address -> lat/lng. Provider-swappable.
- * Default: free US Census geocoder (no key, US-only, good for Houston).
- * Set NEXT_PUBLIC_MAPBOX_TOKEN to auto-switch to Mapbox (better coverage). */
+ * Default: free US Census geocoder (no key, US-only, good for street
+ * addresses), then Photon for places Census can't match (neighborhoods,
+ * landmarks). Set NEXT_PUBLIC_MAPBOX_TOKEN to auto-switch to Mapbox. */
 
 export interface GeoPoint {
   lat: number;
@@ -16,17 +17,45 @@ export interface Suggestion {
 
 // Houston bias for type-ahead ranking.
 const HOUSTON = { lat: 29.7604, lng: -95.3698 };
-// Greater Houston / SE Texas bounding box (minLon, minLat, maxLon, maxLat).
-// Constrains suggestions to the service area so out-of-region hits drop out.
-const HOUSTON_BBOX = '-96.4,28.9,-94.4,30.6';
+// Greater Houston / SE Texas bounding box. Constrains suggestions to the
+// service area, and gates /risk — the backend 500s far from Harris County.
+export const HOUSTON_BOUNDS = { minLng: -96.4, minLat: 28.9, maxLng: -94.4, maxLat: 30.6 } as const;
+const HOUSTON_BBOX = [
+  HOUSTON_BOUNDS.minLng,
+  HOUSTON_BOUNDS.minLat,
+  HOUSTON_BOUNDS.maxLng,
+  HOUSTON_BOUNDS.maxLat,
+].join(',');
+const TIMEOUT_MS = 6000;
 
-/* Type-ahead suggestions. Photon (komoot) — free, no key, built for autocomplete.
- * Biased toward Houston. Swap provider here later (Mapbox/Google) without
- * touching callers. */
+export function inServiceArea(lat: number, lng: number): boolean {
+  return (
+    lat >= HOUSTON_BOUNDS.minLat &&
+    lat <= HOUSTON_BOUNDS.maxLat &&
+    lng >= HOUSTON_BOUNDS.minLng &&
+    lng <= HOUSTON_BOUNDS.maxLng
+  );
+}
+
+// Census needs a city to match a bare street address ("2100 Memorial").
+function withCity(q: string): string {
+  return /houston|,\s*tx\b|texas|\b7\d{4}\b/i.test(q) ? q : `${q}, Houston, TX`;
+}
+
+/* Type-ahead suggestions. Photon (komoot) — free, no key, built for autocomplete
+ * and biased toward Houston. Photon misses partial house numbers ("2100
+ * Memorial"), so an empty answer falls back to the Census geocoder's single
+ * best match: the user always gets at least one suggestion when one exists. */
 export async function suggestAddresses(query: string): Promise<Suggestion[]> {
   const q = query.trim();
   if (q.length < 3) return [];
+  const photon = await suggestPhoton(q);
+  if (photon.length > 0) return photon;
+  const census = await geocodeCensus(withCity(q));
+  return census ? [{ label: census.label ?? q, lat: census.lat, lng: census.lng }] : [];
+}
 
+async function suggestPhoton(q: string): Promise<Suggestion[]> {
   const url =
     'https://photon.komoot.io/api/' +
     `?q=${encodeURIComponent(q)}` +
@@ -35,7 +64,7 @@ export async function suggestAddresses(query: string): Promise<Suggestion[]> {
     '&limit=6&lang=en';
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return [];
     const data = await res.json();
     const features = Array.isArray(data?.features) ? data.features : [];
@@ -65,10 +94,42 @@ function formatSuggestion(p: Record<string, string>): string {
   return parts.join(', ');
 }
 
+/* Coordinates -> a readable address, for "Locate me". Photon reverse;
+ * null when it has nothing. */
+export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}&lang=en`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const props = data?.features?.[0]?.properties;
+    return props ? formatSuggestion(props) || null : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function geocode(address: string): Promise<GeoPoint | null> {
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (token) return geocodeMapbox(address, token);
-  return geocodeCensus(address);
+  const census = await geocodeCensus(withCity(address));
+  if (census) return census;
+  // Neighborhoods and landmarks ("Meyerland") — Census only knows streets.
+  const [hit] = await suggestPhoton(address);
+  return hit ? { lat: hit.lat, lng: hit.lng, label: hit.label } : null;
+}
+
+/* Census answers in capitals: "2100 MEMORIAL DR, HOUSTON, TX, 77007". */
+function prettyCensus(label: string): string {
+  const parts = label.split(',').map((p) => p.trim());
+  const zip = /^\d{5}(-\d{4})?$/.test(parts[parts.length - 1] ?? '') ? parts.pop() : undefined;
+  const state = parts.length > 1 && /^[A-Z]{2}$/.test(parts[parts.length - 1]) ? parts.pop() : undefined;
+  const words = parts.map((p) =>
+    p.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()),
+  );
+  const tail = [state, zip].filter(Boolean).join(' ');
+  return [...words, tail].filter(Boolean).join(', ');
 }
 
 async function geocodeCensus(address: string): Promise<GeoPoint | null> {
@@ -78,7 +139,7 @@ async function geocodeCensus(address: string): Promise<GeoPoint | null> {
     '&benchmark=Public_AR_Current&format=json';
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return null;
     const data = await res.json();
     const match = data?.result?.addressMatches?.[0];
@@ -87,7 +148,7 @@ async function geocodeCensus(address: string): Promise<GeoPoint | null> {
     return {
       lat: match.coordinates.y,
       lng: match.coordinates.x,
-      label: match.matchedAddress,
+      label: prettyCensus(match.matchedAddress),
     };
   } catch {
     return null;

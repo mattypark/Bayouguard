@@ -1,10 +1,11 @@
 /* Backend adapter. The FastAPI backend exposes /risk and /gauges (no /snapshot),
  * has no weather or drive verdict, and needs lat/lng. This layer geocodes the
- * address, calls the backend + Open-Meteo, and assembles a HomeSnapshot.
+ * address, calls the backend + HCFWS + Open-Meteo, and assembles a FloodView
+ * that says honestly where every number came from.
  *
- * Isomorphic: runs on the Next server (initial render) and in the browser (search).
- * Set NEXT_PUBLIC_API_BASE_URL in .env.local. Without it (or when the backend
- * is down) the gauges come from lib/placeholder.ts and the view says so. */
+ * Server-side (the /map render and the /api/flood route). Set
+ * NEXT_PUBLIC_API_BASE_URL to the backend. Gauges fall back from the backend
+ * to the HCFWS feed (real readings, no model) to lib/fixtures (demo). */
 
 import type {
   HomeSnapshot,
@@ -14,58 +15,62 @@ import type {
   DriveVerdict,
   GaugePoint,
   FloodView,
+  DataSource,
+  RiskSource,
 } from './types';
-import { geocode } from './geocode';
-import { getWeather, getRainForecast } from './weather';
-import { getGaugeExtras, type GaugeExtra } from './hcfws';
+import {
+  isBackendGauge,
+  isBackendRisk,
+  tierForBuffer,
+  type BackendGauge,
+  type BackendRisk,
+  type RawTier,
+} from './contract';
+import { geocode, inServiceArea } from './geocode';
+import { getConditions } from './weather';
+import { getHcfws, type GaugeExtra } from './hcfws';
 import { buildOutlook } from './outlook';
-import { SAMPLE_GAUGES } from './placeholder';
+import { DEMO_GAUGES } from './fixtures';
+import { gaugeName } from './gaugeNames';
+import { haversine } from './geo';
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-const DEFAULT_ADDRESS = '2100 Memorial Dr, Houston, TX 77027';
+export const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/+$/, '');
+export const HAS_BACKEND = BASE.length > 0;
+
 const NEAREST_BAYOU_COUNT = 4;
+/** Default wait for a backend that is already awake. */
+export const WARM_TIMEOUT_MS = 15_000;
 
-// Shown when backend is unset or a lookup fails, so the UI never renders empty.
-const MOCK: HomeSnapshot = {
-  risk: {
-    address: DEFAULT_ADDRESS,
-    zip: '77027',
-    score: 42,
-    tier: 'MEDIUM',
-    message: 'Brays Bayou rising. Monitor conditions.',
-    updatedAt: new Date().toISOString(),
-  },
-  weather: { tempF: 78, conditions: 'Partly cloudy', windMph: 12, humidity: 71 },
-  drive: { state: 'CAUTION', message: 'Some low-lying roads may flood. Avoid underpasses.' },
-  bayous: [
-    { name: 'Brays',     stage: 18.4, flood: 20, spark: [12,13,14,15,16,16.5,17,17.4,17.8,18,18.2,18.4] },
-    { name: 'Buffalo',   stage: 14.1, flood: 25, spark: [11,11.4,12,12.6,13,13.2,13.4,13.6,13.8,13.9,14,14.1] },
-    { name: 'White Oak', stage:  9.8, flood: 18, spark: [6,6.5,7,7.4,7.8,8.2,8.5,8.8,9,9.3,9.6,9.8] },
-    { name: 'Cypress',   stage:  7.2, flood: 16, spark: [4,4.4,4.8,5.2,5.6,5.8,6,6.3,6.6,6.8,7,7.2] },
-  ],
-};
+type NamedGauge = BackendGauge & { name?: string; trend?: number };
 
-interface BackendRisk {
-  address: string;
-  risk_tier: string; // SAFE | LOW | MEDIUM | HIGH | CRITICAL | UNKNOWN
-  risk_score: number;
-  buffer_ft: number;
-  nearest_gauge_distance_miles: number;
-  message: string;
-  error?: string;
+export type Fetched<T> =
+  | { ok: true; data: T }
+  | { ok: false; timedOut: boolean; status?: number };
+
+/* One backend GET with a hard timeout. Never throws. */
+export async function backendGet<T>(
+  path: string,
+  timeoutMs: number,
+  validate: (v: unknown) => v is T,
+  init?: RequestInit & { next?: { revalidate?: number } },
+): Promise<Fetched<T>> {
+  if (!HAS_BACKEND) return { ok: false, timedOut: false };
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      cache: init?.next ? undefined : 'no-store',
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return { ok: false, timedOut: false, status: res.status };
+    const data: unknown = await res.json();
+    return validate(data) ? { ok: true, data } : { ok: false, timedOut: false, status: res.status };
+  } catch (err) {
+    const name = (err as { name?: string })?.name;
+    return { ok: false, timedOut: name === 'TimeoutError' || name === 'AbortError' };
+  }
 }
 
-interface BackendGauge {
-  id: number;
-  latitude: number;
-  longitude: number;
-  current_level_ft: number;
-  flood_level_ft: number;
-  buffer_ft: number;
-  risk_tier: string;
-}
-
-// Backend tier set -> frontend Tier. SAFE/UNKNOWN collapse to LOW.
+// Backend tier set -> frontend Tier. SAFE (and anything unknown) folds into LOW.
 export function normalizeTier(t: string): Tier {
   switch (t) {
     case 'CRITICAL': return 'CRITICAL';
@@ -75,41 +80,18 @@ export function normalizeTier(t: string): Tier {
   }
 }
 
-// Representative score per tier when we have to synthesize risk locally.
-const TIER_SCORE: Record<Tier, number> = {
-  LOW: 20,
-  MEDIUM: 50,
-  HIGH: 75,
-  CRITICAL: 95,
-};
+function rawTier(t: string): RawTier {
+  return t === 'SAFE' || t === 'LOW' || t === 'MEDIUM' || t === 'HIGH' || t === 'CRITICAL' ? t : 'LOW';
+}
 
-/* Fallback risk when the backend /risk endpoint is unavailable (it can 500 on
- * gauges with no StreamData). Uses the nearest *valid* gauge from /gauges, so
- * the reading stays real and location-specific instead of collapsing to mock. */
-function riskFromNearestGauge(
-  gauges: BackendGauge[],
-  lat: number,
-  lng: number,
-  address: string,
-): RiskSnapshot {
-  let nearest = gauges[0];
-  let best = Infinity;
-  for (const g of gauges) {
-    const d = haversine(lat, lng, g.latitude, g.longitude);
-    if (d < best) {
-      best = d;
-      nearest = g;
-    }
-  }
-  const tier = normalizeTier(nearest.risk_tier);
-  return {
-    address,
-    zip: zipFromAddress(address),
-    score: TIER_SCORE[tier],
-    tier,
-    message: `Nearest gauge (${best.toFixed(1)} mi away) reads ${nearest.current_level_ft} ft; it floods at ${nearest.flood_level_ft} ft.`,
-    updatedAt: new Date().toISOString(),
-  };
+/* Score for a locally-estimated risk, from headroom alone. Only used when the
+ * model is unavailable; labelled as an estimate wherever it shows. */
+function scoreFromBuffer(bufferFt: number): number {
+  if (bufferFt <= 0) return 95;
+  if (bufferFt < 2) return Math.round(90 - bufferFt * 7.5); // 90..75
+  if (bufferFt < 5) return Math.round(74 - (bufferFt - 2) * 8); // 74..50
+  if (bufferFt < 10) return Math.round(49 - (bufferFt - 5) * 5); // 49..25
+  return Math.max(5, Math.round(24 - (bufferFt - 10)));
 }
 
 // Backend has no drive verdict; derive it from the risk tier.
@@ -117,11 +99,11 @@ function driveFromTier(tier: Tier): DriveVerdict {
   switch (tier) {
     case 'CRITICAL':
     case 'HIGH':
-      return { state: 'NO', message: 'High-water risk on local roads. Do not drive.' };
+      return { state: 'NO' };
     case 'MEDIUM':
-      return { state: 'CAUTION', message: 'Some low-lying roads may flood. Avoid underpasses.' };
+      return { state: 'CAUTION' };
     default:
-      return { state: 'YES', message: 'Roads clear. Normal driving conditions.' };
+      return { state: 'YES' };
   }
 }
 
@@ -130,98 +112,62 @@ function zipFromAddress(address: string): string {
   return m ? m[1] : '';
 }
 
-function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 3959; // miles
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.asin(Math.sqrt(a));
+function byDistance(gauges: NamedGauge[], lat: number, lng: number) {
+  return gauges
+    .map((g) => ({ g, miles: haversine(lat, lng, g.latitude, g.longitude) }))
+    .sort((a, b) => a.miles - b.miles);
 }
 
-// Nearest gauges -> bayou readings. Gauges carry no name, so label by id and
-// county network; the live HCFWS trend rides along for the arrows in the UI.
+function nameOf(g: NamedGauge, extras: Map<number, GaugeExtra>): string {
+  return g.name || gaugeName(g.id, extras.get(g.id)?.name);
+}
+
+// Nearest gauges -> readings, with real names and the live HCFWS trend.
 function nearestBayous(
-  gauges: BackendGauge[],
-  lat: number,
-  lng: number,
+  sorted: Array<{ g: NamedGauge; miles: number }>,
   extras: Map<number, GaugeExtra>,
 ): BayouReading[] {
-  return [...gauges]
-    .sort(
-      (a, b) =>
-        haversine(lat, lng, a.latitude, a.longitude) -
-        haversine(lat, lng, b.latitude, b.longitude),
-    )
-    .slice(0, NEAREST_BAYOU_COUNT)
-    .map((g) => {
-      const x = extras.get(g.id);
-      return {
-        name: x?.county ? `Gauge ${g.id} · ${x.county}` : `Gauge ${g.id}`,
-        stage: g.current_level_ft,
-        flood: g.flood_level_ft,
-        spark: [g.current_level_ft, g.current_level_ft],
-        trend: x?.trend,
-      };
-    });
+  return sorted.slice(0, NEAREST_BAYOU_COUNT).map(({ g, miles }) => ({
+    id: g.id,
+    name: nameOf(g, extras),
+    miles: Math.round(miles * 10) / 10,
+    stage: g.current_level_ft,
+    flood: g.flood_level_ft,
+    spark: [g.current_level_ft, g.current_level_ft],
+    trend: g.trend ?? extras.get(g.id)?.trend,
+  }));
 }
 
-// Nearest single backend gauge (for the outlook inputs).
-function nearestGauge(
-  gauges: BackendGauge[],
-  lat: number,
-  lng: number,
-): BackendGauge | null {
-  let best: BackendGauge | null = null;
-  let bestD = Infinity;
-  for (const g of gauges) {
-    const d = haversine(lat, lng, g.latitude, g.longitude);
-    if (d < bestD) {
-      bestD = d;
-      best = g;
-    }
+export interface GaugeLoad {
+  gauges: NamedGauge[];
+  source: FloodView['gaugeSource'];
+  timedOut: boolean;
+}
+
+/* Real gauges when the backend answers; the HCFWS feed's own readings when it
+ * doesn't; the demo set when neither does. */
+export async function loadGauges(
+  timeoutMs = WARM_TIMEOUT_MS,
+  hcfws?: Promise<Awaited<ReturnType<typeof getHcfws>>>,
+): Promise<GaugeLoad> {
+  const live = await backendGet(
+    '/gauges',
+    timeoutMs,
+    (v): v is { gauges: BackendGauge[] } =>
+      Array.isArray((v as { gauges?: unknown })?.gauges),
+    { next: { revalidate: 60 } },
+  );
+  if (live.ok) {
+    const gauges = live.data.gauges.filter(isBackendGauge);
+    if (gauges.length > 0) return { gauges, source: 'backend', timedOut: false };
   }
-  return best;
+  const timedOut = !live.ok && live.timedOut;
+  const feed = await (hcfws ?? getHcfws());
+  if (feed.gauges.length > 0) return { gauges: feed.gauges, source: 'hcfws', timedOut };
+  return { gauges: [...DEMO_GAUGES], source: 'demo', timedOut };
 }
 
-async function fetchRisk(
-  address: string,
-  lat: number,
-  lng: number,
-): Promise<BackendRisk | null> {
-  if (!BASE) return null;
-  const url =
-    `${BASE}/risk?address=${encodeURIComponent(address)}` +
-    `&lat=${lat}&lng=${lng}`;
-  try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const data = (await res.json()) as BackendRisk;
-    if (data.error) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchGauges(): Promise<BackendGauge[]> {
-  if (!BASE) return [];
-  try {
-    const res = await fetch(`${BASE}/gauges`, { next: { revalidate: 60 } });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data?.gauges) ? (data.gauges as BackendGauge[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function toGaugePoints(
-  gauges: BackendGauge[],
-  extras: Map<number, GaugeExtra>,
-): GaugePoint[] {
+function toGaugePoints(gauges: NamedGauge[], extras: Map<number, GaugeExtra>): GaugePoint[] {
   return gauges.map((g) => {
     const x = extras.get(g.id);
     return {
@@ -232,7 +178,9 @@ function toGaugePoints(
       flood: g.flood_level_ft,
       buffer: g.buffer_ft,
       tier: normalizeTier(g.risk_tier),
-      trend: x?.trend,
+      rawTier: rawTier(g.risk_tier),
+      name: nameOf(g, extras),
+      trend: g.trend ?? x?.trend,
       rainfall: x?.rainfall,
       readAt: x?.readAt,
       county: x?.county,
@@ -240,93 +188,162 @@ function toGaugePoints(
   });
 }
 
-/* Real gauges when the backend answers, the placeholder set when it doesn't.
- * BACKEND: once /gauges is deployed and reliable, the sample branch goes. */
-export async function loadGauges(): Promise<{ gauges: BackendGauge[]; sample: boolean }> {
-  const live = await fetchGauges();
-  return live.length > 0
-    ? { gauges: live, sample: false }
-    : { gauges: [...SAMPLE_GAUGES], sample: true };
+function gaugeOnlySource(load: GaugeLoad): DataSource {
+  return load.source === 'backend' ? 'live' : load.source === 'hcfws' ? 'partial' : 'demo';
 }
 
-function mockView(gauges: BackendGauge[], sample: boolean): FloodView {
+/** Gauges only — the map before any address is searched. */
+export async function getGaugeView(timeoutMs = WARM_TIMEOUT_MS): Promise<FloodView> {
+  const hcfws = getHcfws();
+  const [load, { extras }] = await Promise.all([loadGauges(timeoutMs, hcfws), hcfws]);
   return {
-    snapshot: MOCK,
+    snapshot: null,
     center: null,
-    gauges: toGaugePoints(gauges, new Map()),
-    sample,
+    address: null,
+    gauges: toGaugePoints(load.gauges, extras),
+    dataSource: gaugeOnlySource(load),
+    gaugeSource: load.source,
+    backendTimedOut: load.timedOut,
+    fetchedAt: new Date().toISOString(),
   };
 }
 
-/* Full assembly: geocode -> /risk + /gauges + weather -> snapshot + map data.
- * Both the SSR snapshot and the interactive map are built from this. */
+/** The demo view: what the server renders when it can't wait any longer. */
+export function demoView(
+  center: { lat: number; lng: number } | null = null,
+  address: string | null = null,
+  pending = false,
+): FloodView {
+  return {
+    snapshot: null,
+    center,
+    address,
+    gauges: toGaugePoints([...DEMO_GAUGES], new Map()),
+    dataSource: 'demo',
+    gaugeSource: 'demo',
+    backendTimedOut: false,
+    pending,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/* Full assembly: geocode -> /risk + gauges + weather -> snapshot + map data. */
 export async function getFloodView(
   address?: string,
   coords?: { lat: number; lng: number },
+  /** lite: leave the gauge list out — the result page shows no map. */
+  opts: { timeoutMs?: number; lang?: string; lite?: boolean } = {},
 ): Promise<FloodView> {
-  const query = address ?? DEFAULT_ADDRESS;
+  const timeoutMs = opts.timeoutMs ?? WARM_TIMEOUT_MS;
+  const query = address?.trim();
+  if (!query) return getGaugeView(timeoutMs);
 
-  // A picked autocomplete suggestion already carries coords — skip re-geocoding.
+  // A picked suggestion already carries coords — skip re-geocoding.
   const geo = coords
-    ? { lat: coords.lat, lng: coords.lng, label: address }
+    ? { lat: coords.lat, lng: coords.lng, label: query }
     : await geocode(query);
+
+  const hcfws = getHcfws();
   if (!geo) {
-    // Unresolvable address -> keep the UI populated.
-    const { gauges, sample } = await loadGauges();
-    return mockView(gauges, sample);
+    const view = await getGaugeView(timeoutMs);
+    return { ...view, address: query, notFound: true };
   }
 
-  const [risk, { gauges, sample }, weather, extras, rain] = await Promise.all([
-    fetchRisk(geo.label ?? query, geo.lat, geo.lng),
-    loadGauges(),
-    getWeather(geo.lat, geo.lng),
-    getGaugeExtras(),
-    getRainForecast(geo.lat, geo.lng),
+  const resolvedAddress = geo.label ?? query;
+  const center = { lat: geo.lat, lng: geo.lng };
+
+  // The backend 500s far from Harris County — don't ask it.
+  if (!inServiceArea(geo.lat, geo.lng)) {
+    const view = await getGaugeView(timeoutMs);
+    return { ...view, center, address: resolvedAddress, outOfArea: true };
+  }
+
+  const lang = opts.lang && /^(en|es|vi)$/.test(opts.lang) ? opts.lang : 'en';
+  const riskPath =
+    `/risk?address=${encodeURIComponent(resolvedAddress)}` +
+    `&lat=${geo.lat}&lng=${geo.lng}&lang=${lang}`;
+
+  const [risk, load, { weather, rain }, { extras }] = await Promise.all([
+    backendGet<BackendRisk>(riskPath, timeoutMs, isBackendRisk),
+    loadGauges(timeoutMs, hcfws),
+    getConditions(geo.lat, geo.lng),
+    hcfws,
   ]);
 
-  const resolvedAddress = geo.label ?? risk?.address ?? query;
-  const bayous = nearestBayous(gauges, geo.lat, geo.lng, extras);
+  const sorted = byDistance(load.gauges, geo.lat, geo.lng);
+  const nearest = sorted[0] ?? null;
+  const nearestName = nearest ? nameOf(nearest.g, extras) : null;
 
-  // Prefer the backend's ML risk; otherwise synthesize from the nearest gauge so
-  // the graph + reading always reflect real data even when /risk errors.
-  const riskSnapshot: RiskSnapshot = risk
-    ? {
-        address: resolvedAddress,
-        zip: zipFromAddress(resolvedAddress),
-        score: risk.risk_score,
-        tier: normalizeTier(risk.risk_tier),
-        message: risk.message,
-        updatedAt: new Date().toISOString(),
-      }
-    : riskFromNearestGauge(gauges, geo.lat, geo.lng, resolvedAddress);
+  let riskSnapshot: RiskSnapshot;
+  if (risk.ok) {
+    const r = risk.data;
+    const source: RiskSource = r.model_used === 'ML' ? 'model' : 'rules';
+    riskSnapshot = {
+      address: resolvedAddress,
+      zip: zipFromAddress(resolvedAddress),
+      score: Math.max(0, Math.min(100, Math.round(r.risk_score))),
+      tier: normalizeTier(r.risk_tier),
+      rawTier: rawTier(r.risk_tier),
+      source,
+      bufferFt: r.buffer_ft,
+      nearestMiles: r.nearest_gauge_distance_miles,
+      nearestName,
+      backendMessage: r.message,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    // Score locally from the nearest gauge's headroom — real readings when the
+    // gauges are real, but a rule of thumb, not the model.
+    const buffer = nearest?.g.buffer_ft ?? 10;
+    const raw = tierForBuffer(buffer);
+    riskSnapshot = {
+      address: resolvedAddress,
+      zip: zipFromAddress(resolvedAddress),
+      score: scoreFromBuffer(buffer),
+      tier: normalizeTier(raw),
+      rawTier: raw,
+      source: load.source === 'demo' ? 'demo' : 'gauge-estimate',
+      bufferFt: nearest ? buffer : null,
+      nearestMiles: nearest ? Math.round(nearest.miles * 100) / 100 : null,
+      nearestName,
+      updatedAt: new Date().toISOString(),
+    };
+  }
 
   // 6-hour outlook: nearest gauge's headroom + live trend + incoming rain.
-  const near = nearestGauge(gauges, geo.lat, geo.lng);
-  const outlook = near
+  const outlook = nearest
     ? buildOutlook(
-        risk?.buffer_ft ?? near.buffer_ft,
-        extras.get(near.id)?.trend ?? 0,
+        riskSnapshot.bufferFt ?? nearest.g.buffer_ft,
+        nearest.g.trend ?? extras.get(nearest.g.id)?.trend ?? 0,
         rain,
       )
     : undefined;
 
   const snapshot: HomeSnapshot = {
     risk: riskSnapshot,
-    weather: weather ?? MOCK.weather,
+    weather,
     drive: driveFromTier(riskSnapshot.tier),
-    bayous,
+    bayous: nearestBayous(sorted, extras),
     rain: rain ?? undefined,
     outlook,
   };
 
+  const gaugesLive = load.source === 'backend';
+  const dataSource: DataSource =
+    risk.ok && gaugesLive
+      ? 'live'
+      : risk.ok || gaugesLive || load.source === 'hcfws'
+        ? 'partial'
+        : 'demo';
+
   return {
     snapshot,
-    center: { lat: geo.lat, lng: geo.lng },
-    gauges: toGaugePoints(gauges, extras),
-    sample,
+    center,
+    address: resolvedAddress,
+    gauges: opts.lite ? [] : toGaugePoints(load.gauges, extras),
+    dataSource,
+    gaugeSource: load.source,
+    backendTimedOut: (!risk.ok && risk.timedOut) || load.timedOut,
+    fetchedAt: new Date().toISOString(),
   };
-}
-
-export async function getHomeSnapshot(address?: string): Promise<HomeSnapshot> {
-  return (await getFloodView(address)).snapshot;
 }

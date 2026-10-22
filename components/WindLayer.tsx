@@ -11,7 +11,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
-import { inTexas } from '@/lib/dotField';
+import { inTexas } from '@/lib/texas';
 import type { WindField } from '@/lib/wind';
 
 const PARTICLE_COUNT = 550;

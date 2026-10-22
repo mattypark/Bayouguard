@@ -18,22 +18,25 @@ module.exports = {
           muted: 'rgb(var(--ob-muted-rgb) / <alpha-value>)',
           faint: 'rgb(var(--ob-faint-rgb) / <alpha-value>)',
           accent: 'rgb(var(--ob-accent-rgb) / <alpha-value>)',
+          water: 'rgb(var(--ob-water-rgb) / <alpha-value>)',
+          onaccent: 'rgb(var(--ob-onaccent-rgb) / <alpha-value>)',
         },
-        // Risk tiers — readable on cream and on near-black
+        // Risk tier fills; theme-aware (see globals.css). Small text uses the
+        // TIER_INK variables instead.
         tier: {
-          low: '#12a067',
-          med: '#e0930c',
-          high: '#e4432d',
-          crit: '#8b3fe0',
+          low: 'rgb(var(--tier-low-rgb) / <alpha-value>)',
+          med: 'rgb(var(--tier-med-rgb) / <alpha-value>)',
+          high: 'rgb(var(--tier-high-rgb) / <alpha-value>)',
+          crit: 'rgb(var(--tier-crit-rgb) / <alpha-value>)',
         },
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'Georgia', 'serif'],
         mono: ['var(--font-jbmono)', 'ui-monospace', 'monospace'],
       },
-      boxShadow: {
-        glow: '0 0 0 3px rgb(var(--ob-accent-rgb) / 0.18)',
-        panel: '0 1px 0 rgb(var(--ob-shadow-rgb) / 0.04), 0 22px 44px -22px rgb(var(--ob-shadow-rgb) / 0.28)',
+      borderRadius: {
+        card: '12px',
       },
     },
   },

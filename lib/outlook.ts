@@ -10,7 +10,7 @@
  * this must never read calmer than the official picture. */
 
 import type { Outlook, RainForecast } from './types';
-import { classifyTrend } from './hcfws';
+import { classifyTrend } from './trend';
 
 // Rain that meaningfully moves Houston bayous (inches over 6h).
 const RAIN_WATCH_IN = 0.5;
@@ -21,58 +21,35 @@ export function buildOutlook(
   trendFtHr: number,
   rain: RainForecast | null,
 ): Outlook {
-  const trendState = classifyTrend(trendFtHr);
+  const trend = classifyTrend(trendFtHr);
   const rain6 = rain?.totalNext6h ?? 0;
   // Naive linear projection of the gauge over 6 hours at the current rate.
-  const projectedDrop = trendFtHr * 6; // positive = level gain
-  const projectedBuffer = bufferFt - Math.max(0, projectedDrop);
-
-  const rainNote =
-    rain6 >= RAIN_WATCH_IN
-      ? ` ${rain6.toFixed(2)}" of rain expected in the next 6 hours.`
-      : rain6 > 0
-        ? ` Light rain (${rain6.toFixed(2)}") possible.`
-        : ' No significant rain in the forecast.';
+  const projectedRise = trendFtHr * 6; // positive = level gain
+  const projectedBuffer = bufferFt - Math.max(0, projectedRise);
+  const base = { trend, trendFtHr, bufferFt, rain6 };
 
   // WARNING — projected to flood, or rising with little headroom, or heavy rain
   // on an already-tight gauge.
   if (
     projectedBuffer <= 0 ||
-    (trendState === 'rising' && bufferFt <= 3) ||
+    (trend === 'rising' && bufferFt <= 3) ||
     (rain6 >= RAIN_WARNING_IN && bufferFt <= 5)
   ) {
-    return {
-      level: 'WARNING',
-      headline: 'Conditions worsening',
-      detail:
-        `Nearest gauge is ${trendState === 'rising' ? `rising ${trendFtHr.toFixed(2)} ft/hr with` : 'holding'} ` +
-        `${bufferFt.toFixed(1)} ft of headroom.${rainNote} Follow official guidance.`,
-    };
+    return { level: 'WARNING', kind: 'worsening', ...base };
   }
 
   // WATCH — rising anywhere, or enough incoming rain to matter.
-  if (trendState === 'rising' || rain6 >= RAIN_WATCH_IN) {
-    return {
-      level: 'WATCH',
-      headline:
-        trendState === 'rising' ? 'Water rising — stay aware' : 'Rain incoming — stay aware',
-      detail:
-        trendState === 'rising'
-          ? `Nearest gauge is rising ${trendFtHr.toFixed(2)} ft/hr with ${bufferFt.toFixed(1)} ft of headroom.${rainNote}`
-          : `Levels are steady with ${bufferFt.toFixed(1)} ft of headroom.${rainNote}`,
-    };
+  if (trend === 'rising' || rain6 >= RAIN_WATCH_IN) {
+    return { level: 'WATCH', kind: trend === 'rising' ? 'rising' : 'rain', ...base };
   }
 
   // CLEAR — steady or falling, no meaningful rain.
-  return {
-    level: 'CLEAR',
-    headline:
-      trendState === 'falling' ? 'Water receding' : 'Holding steady',
-    detail:
-      `Nearest gauge is ${
-        trendState === 'falling'
-          ? `falling ${Math.abs(trendFtHr).toFixed(2)} ft/hr`
-          : 'steady'
-      } with ${bufferFt.toFixed(1)} ft of headroom.${rainNote}`,
-  };
+  return { level: 'CLEAR', kind: trend === 'falling' ? 'receding' : 'steady', ...base };
+}
+
+/** Rain wording bucket shared by the outlook sentence. */
+export function rainBucket(rain6: number): 'heavy' | 'light' | 'none' {
+  if (rain6 >= RAIN_WATCH_IN) return 'heavy';
+  if (rain6 > 0) return 'light';
+  return 'none';
 }

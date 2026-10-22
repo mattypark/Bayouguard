@@ -1,32 +1,77 @@
 'use client';
 
-/* Interactive Leaflet map of Texas, and only Texas: panning is clamped to the
- * state, minZoom is computed from its bounds so even ultrawide windows can't
- * zoom past it, and everything outside the border is masked to the page's
- * paper colour. Zoom stops where the basemap's tiles stop (16), so labels are
- * never stretched into blurry giants. Composable
- * layers controlled by the LayerControl checkboxes: risk-tier gauge dots,
- * "tsunami" ripple pulses, animated wind flow, satellite imagery, and the
- * statewide USGS context network. Loaded client-only (Leaflet touches window). */
+/* Interactive Leaflet map of the Houston-area sensor network, and only that:
+ * panning is clamped to the region the gauges cover, and minZoom is computed
+ * from it so even ultrawide windows can't zoom out past it. Zoom stops where
+ * the basemap's tiles stop (16), and the street labels fade out while zooming
+ * so old and new labels never stack up. Composable layers controlled by the
+ * LayerControl checkboxes: risk-tier gauge dots, ripples on dangerous gauges,
+ * wind flow, satellite imagery, shelters, roads, reports and reservoirs.
+ * Loaded client-only (Leaflet touches window). */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   MapContainer,
   TileLayer,
   CircleMarker,
   Marker,
   Pane,
-  Polygon,
+  Polyline,
   Tooltip,
   useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { GaugePoint, Tier } from '@/lib/types';
-import type { UsgsGauge } from '@/lib/usgs';
-import { TIER_COLOR, OB, type Mode } from '@/lib/theme';
-import { TEXAS_RINGS } from '@/lib/geoDots';
+import { TIER_HEX, OB, BASEMAP, type Mode } from '@/lib/theme';
+import { useI18n } from '@/lib/i18n';
 import type { MapLayers } from './LayerControl';
+import type { CommunityReport, Reservoir, RoadCollection, Shelter } from '@/lib/contract';
+import { RESERVOIR_POINTS } from './inspector/ReservoirCard';
+
+export interface MapOverlays {
+  shelters?: Shelter[] | null;
+  roads?: RoadCollection | null;
+  reports?: CommunityReport[] | null;
+  reservoirs?: Reservoir[] | null;
+}
+
+function makeShelterIcon(fill: string, status: Shelter['status']) {
+  const opacity = status === 'closed' ? 0.55 : 1;
+  return L.divIcon({
+    className: '',
+    html:
+      `<div style="width:26px;height:26px;border-radius:6px;background:${fill};opacity:${opacity};` +
+      'display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 4px rgba(26,26,46,.3)">' +
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 20 12 4l9 16H3z" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/>' +
+      '<path d="M9.5 20 12 14l2.5 6" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg></div>',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+  });
+}
+
+function makeReportIcon(fill: string) {
+  return L.divIcon({
+    className: '',
+    html:
+      '<svg width="20" height="26" viewBox="0 0 26 34" style="filter:drop-shadow(0 1px 2px rgba(26,26,46,.35))">' +
+      `<path d="M13 0C5.8 0 0 5.8 0 13c0 9 13 21 13 21s13-12 13-21C26 5.8 20.2 0 13 0z" fill="${fill}" stroke="#fff" stroke-width="2"/>` +
+      '<path d="M7 15c2-2 4-2 6 0s4 2 6 0" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
+    iconSize: [20, 26],
+    iconAnchor: [10, 26],
+  });
+}
+
+function makeReservoirIcon(fill: string, letter: string) {
+  return L.divIcon({
+    className: '',
+    html:
+      `<div style="width:24px;height:24px;border-radius:4px;background:${fill};color:#fff;font:700 12px/24px var(--font-inter),sans-serif;` +
+      `text-align:center;border:2px solid #fff;box-shadow:0 2px 4px rgba(26,26,46,.3)">${letter}</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+}
 import WindLayer from './WindLayer';
 
 export interface MapSelection {
@@ -37,27 +82,20 @@ export interface MapSelection {
 
 const HOUSTON: [number, number] = [29.7604, -95.3698];
 
-// Texas's extent with a sliver of margin, so the border isn't flush with the
-// screen edge at the widest zoom.
+// Every gauge in the network (29.31-30.69 N, 96.09-94.84 W) with a margin:
+// BayouGuard covers greater Houston, so the map does too.
 const REGION_BOUNDS: [[number, number], [number, number]] = [
-  [25.4, -107.1], // SW
-  [36.9, -93.1], // NE
+  [29.05, -96.4], // SW
+  [30.9, -94.55], // NE
 ];
 // The grey canvas basemap has tiles to 16. Past that Leaflet stretches them
 // and the labels turn into blurred giants, so the map stops here.
 const MAX_ZOOM = 16;
-const ESRI_CANVAS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas';
 const CANVAS_NATIVE_ZOOM = MAX_ZOOM;
 
-const TEXAS_LINES = TEXAS_RINGS.map((ring) => ring.map(([lat, lng]) => [lat, lng] as [number, number]));
-// How far past the viewport the mask's outer edge reaches, in viewports — enough
-// that a pan or a one-level zoom-out never shows its edge before it's redrawn.
-const MASK_PAD = 1.5;
-const ESRI_ATTRIBUTION = 'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
-
-// Regional zoom shows the gauge cluster in statewide Texas context; street zoom
-// is reserved for an explicit address search.
-const REGION_ZOOM = 7;
+// Regional zoom shows the whole network; street zoom is reserved for an
+// explicit address search.
+const REGION_ZOOM = 9;
 const ADDRESS_ZOOM = 13;
 const GAUGE_ZOOM = 11;
 
@@ -76,14 +114,13 @@ const RIPPLE_SIZE: Record<Tier, number> = {
 };
 
 // Teardrop pin for the searched address, built as a DivIcon so we ship no image
-// assets. `accent` and the inner hole adapt to the active theme.
+// assets. Water-coloured (it marks where you are relative to the water), with
+// a hole in the surface colour.
 function makeAddressIcon(accent: string, hole: string) {
   return L.divIcon({
     className: '',
     html:
-      '<div style="position:relative;width:26px;height:34px;filter:drop-shadow(0 0 6px ' +
-      accent +
-      ');">' +
+      '<div style="position:relative;width:26px;height:34px;filter:drop-shadow(0 2px 3px rgba(26,26,46,0.35));">' +
       '<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
       '<path d="M13 0C5.8 0 0 5.8 0 13c0 9 13 21 13 21s13-12 13-21C26 5.8 20.2 0 13 0z" fill="' +
       accent +
@@ -97,7 +134,7 @@ function makeAddressIcon(accent: string, hole: string) {
   });
 }
 
-function makeRippleIcon(tier: Tier) {
+function makeRippleIcon(tier: Tier, color: string) {
   const size = RIPPLE_SIZE[tier];
   // Random negative delay desynchronizes the pulses across gauges.
   const delay = `-${(Math.random() * 4).toFixed(2)}s`;
@@ -105,7 +142,7 @@ function makeRippleIcon(tier: Tier) {
     className: '',
     html:
       `<div class="gauge-ripple" style="position:absolute;inset:0;` +
-      `--ripple-color:${TIER_COLOR[tier]};--ripple-duration:${RIPPLE_DURATION[tier]};` +
+      `--ripple-color:${color};--ripple-duration:${RIPPLE_DURATION[tier]};` +
       `--ripple-delay:${delay};">` +
       '<span></span><span></span></div>',
     iconSize: [size, size],
@@ -124,83 +161,70 @@ function FocusGauge({ gauge }: { gauge: GaugePoint | null }) {
   return null;
 }
 
-/* Hands the map out once it's laid out and its first tiles are in (or after a
- * short wait), so the intro can melt the dots into a map that's really there. */
-/* Everything that isn't Texas, as a polygon with every Texas ring cut out of
- * it. The outer ring follows the viewport instead of spanning the world: at
- * street zoom a world-sized ring is millions of pixels across and the browser
- * gives up drawing it — the whole map went blank. noClip keeps Leaflet from
- * clipping the holes away once you're zoomed inside Texas. */
-function TexasMask({ fill }: { fill: string }) {
+/* Street labels live in their own pane and fade out for the length of a
+ * zoom, coming back once the new zoom's labels have loaded. Otherwise Leaflet
+ * shows the old zoom's labels stretched and blurry on top of the new ones. */
+function LabelFade() {
   const map = useMap();
-  const [outer, setOuter] = useState<Array<[number, number]>>(() => viewRing(map));
   useEffect(() => {
-    let raf = 0;
-    const update = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => setOuter(viewRing(map)));
+    const el = map.getContainer();
+    let timer = 0;
+    const show = () => {
+      window.clearTimeout(timer);
+      el.classList.remove('labels-hidden');
     };
-    map.on('move zoomend resize', update);
+    const hide = () => {
+      window.clearTimeout(timer);
+      el.classList.add('labels-hidden');
+    };
+    const settle = () => {
+      let labels: L.TileLayer | null = null;
+      map.eachLayer((layer) => {
+        if (layer instanceof L.TileLayer && layer.options.pane === 'labels') labels = layer;
+      });
+      // Show on the labels' load event, or after a beat if it never comes (cached tiles).
+      timer = window.setTimeout(show, 900);
+      if (labels) (labels as L.TileLayer).once('load', show);
+      else show();
+    };
+    map.on('zoomstart', hide);
+    map.on('zoomend', settle);
     return () => {
-      cancelAnimationFrame(raf);
-      map.off('move zoomend resize', update);
+      window.clearTimeout(timer);
+      map.off('zoomstart', hide);
+      map.off('zoomend', settle);
     };
   }, [map]);
-  return (
-    <Polygon
-      positions={[outer, ...TEXAS_LINES]}
-      interactive={false}
-      noClip
-      pathOptions={{ stroke: false, fillColor: fill, fillOpacity: 1 }}
-    />
-  );
-}
-
-function viewRing(map: L.Map): Array<[number, number]> {
-  const b = map.getBounds().pad(MASK_PAD);
-  return [
-    [b.getSouth(), b.getWest()],
-    [b.getNorth(), b.getWest()],
-    [b.getNorth(), b.getEast()],
-    [b.getSouth(), b.getEast()],
-  ];
-}
-
-function ReadyProbe({ onReady }: { onReady?: (map: L.Map) => void }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!onReady) return;
-    let fired = false;
-    const fire = () => {
-      if (fired) return;
-      fired = true;
-      onReady(map);
-    };
-    const timer = window.setTimeout(fire, 1400);
-    map.whenReady(() => {
-      let tiles: L.TileLayer | null = null;
-      map.eachLayer((layer) => {
-        if (!tiles && layer instanceof L.TileLayer) tiles = layer;
-      });
-      if (tiles) (tiles as L.TileLayer).once('load', fire);
-      else fire();
-    });
-    return () => window.clearTimeout(timer);
-  }, [map, onReady]);
   return null;
 }
 
+function MapHandle({ onMap }: { onMap?: (map: L.Map) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onMap?.(map);
+  }, [map, onMap]);
+  return null;
+}
+
+/* Fly to the searched address so the pin lands in the part of the map the
+ * inspector doesn't cover (`inset` = px hidden on the right and bottom). */
 function Recenter({
   center,
   zoomToCenter,
+  inset,
 }: {
   center: [number, number] | null;
   zoomToCenter: boolean;
+  inset: { right: number; bottom: number };
 }) {
   const map = useMap();
+  const lat = center?.[0];
+  const lng = center?.[1];
   useEffect(() => {
-    if (center && zoomToCenter) map.flyTo(center, ADDRESS_ZOOM, { duration: 1.1 });
-  }, [center, zoomToCenter, map]);
+    if (lat == null || lng == null || !zoomToCenter) return;
+    const target = map.project([lat, lng], ADDRESS_ZOOM).add([inset.right / 2, inset.bottom / 2]);
+    map.flyTo(map.unproject(target, ADDRESS_ZOOM), ADDRESS_ZOOM, { duration: 1.1 });
+  }, [lat, lng, zoomToCenter, inset.right, inset.bottom, map]);
   return null;
 }
 
@@ -241,8 +265,9 @@ export default function FloodMap({
   onSelect,
   layers,
   focusGauge = null,
-  initialView,
-  onReady,
+  overlays = {},
+  onMap,
+  inset = { right: 0, bottom: 0 },
 }: {
   center: { lat: number; lng: number } | null;
   gauges: GaugePoint[];
@@ -254,64 +279,46 @@ export default function FloodMap({
   layers: MapLayers;
   /** A gauge chosen outside the map, to fly to. */
   focusGauge?: GaugePoint | null;
-  /** Where to open — set when arriving from the landing's zoom. */
-  initialView?: { lat: number; lng: number; zoom: number } | null;
-  /** Called once the map is laid out and its first tiles have loaded. */
-  onReady?: (map: L.Map) => void;
+  overlays?: MapOverlays;
+  /** The Leaflet map, once created (for the map-centre report location). */
+  onMap?: (map: L.Map) => void;
+  /** Pixels covered by the inspector, so the address pin isn't hidden under it. */
+  inset?: { right: number; bottom: number };
 }) {
-  const start: [number, number] = initialView
-    ? [initialView.lat, initialView.lng]
-    : center
-      ? [center.lat, center.lng]
-      : HOUSTON;
-  const startZoom = initialView
-    ? initialView.zoom
-    : zoomToCenter && center
-      ? ADDRESS_ZOOM
-      : REGION_ZOOM;
-  const maskColor = mode === 'light' ? OB.bg : '#0f0f11';
-  const borderColor = mode === 'light' ? 'rgba(27,24,20,0.55)' : 'rgba(242,238,230,0.5)';
-  // Esri's keyless grey canvas, base and labels as two layers. CARTO's free
-  // basemaps now stamp "API KEY REQUIRED" over every tile.
-  const canvas = mode === 'light' ? 'World_Light_Gray' : 'World_Dark_Gray';
-  const tileBase = `${ESRI_CANVAS}/${canvas}_Base/MapServer/tile/{z}/{y}/{x}`;
-  const tileLabels = `${ESRI_CANVAS}/${canvas}_Reference/MapServer/tile/{z}/{y}/{x}`;
-  // A white keyline lifts the tier fill off cream tiles; ink marks the selection.
-  const strokeColor = mode === 'light' ? '#ffffff' : '#0f0f11';
-  const selectedStroke = mode === 'light' ? OB.text : '#ffffff';
-  const windColor = mode === 'light' ? 'rgba(26,92,255,0.7)' : 'rgba(150,180,255,0.85)';
-  const usgsColor = mode === 'light' ? '#8c8274' : '#9a9286';
-  const addressIcon = useMemo(
-    () =>
-      mode === 'light'
-        ? makeAddressIcon(OB.accent, OB.bg)
-        : makeAddressIcon('#6894ff', '#0f0f11'),
-    [mode],
+  const { t } = useI18n();
+  const yourAddress = t('map.yourAddress');
+  const start: [number, number] = center ? [center.lat, center.lng] : HOUSTON;
+  const startZoom = zoomToCenter && center ? ADDRESS_ZOOM : REGION_ZOOM;
+  const tok = OB[mode];
+  const tierHex = TIER_HEX[mode];
+  const { base: tileBase, labels: tileLabels } = BASEMAP[mode];
+  // A white keyline lifts the tier fill off grey tiles; ink marks the selection.
+  const strokeColor = mode === 'light' ? '#ffffff' : tok.bg;
+  const selectedStroke = tok.text;
+  const windColor = mode === 'light' ? 'rgba(26,68,128,0.55)' : 'rgba(157,190,255,0.8)';
+  const addressIcon = useMemo(() => makeAddressIcon(tok.water, tok.surface), [tok]);
+  const shelterIcons = useMemo(
+    () => ({
+      open: makeShelterIcon(tok.accent, 'open'),
+      full: makeShelterIcon(tok.accent, 'full'),
+      closed: makeShelterIcon(tok.muted, 'closed'),
+    }),
+    [tok],
+  );
+  const reportIcon = useMemo(() => makeReportIcon(tok.accent), [tok]);
+  const reservoirIcons = useMemo(
+    () => new Map(RESERVOIR_POINTS.map((p) => [p.name, makeReservoirIcon(tok.water, p.name[0])])),
+    [tok],
   );
   // Per-gauge icons (not per-tier) so every gauge pulses on its own phase;
   // memoized on the gauge list so selection clicks don't restart animations.
+  // Ripples only where the water is dangerous: a pulse means "look here",
+  // and a few dozen animated markers stay cheap where 338 did not.
+  const rippling = useMemo(() => gauges.filter((g) => g.tier === 'HIGH' || g.tier === 'CRITICAL'), [gauges]);
   const rippleIcons = useMemo(
-    () => new Map(gauges.map((g) => [g.id, makeRippleIcon(g.tier)])),
-    [gauges],
+    () => new Map(rippling.map((g) => [g.id, makeRippleIcon(g.tier, tierHex[g.tier])])),
+    [rippling, tierHex],
   );
-
-  // Statewide USGS context layer — fetched once on demand, kept for the session.
-  const [usgs, setUsgs] = useState<UsgsGauge[] | null>(null);
-  useEffect(() => {
-    if (!layers.usgs || usgs !== null) return;
-    let cancelled = false;
-    fetch('/api/usgs-gauges')
-      .then((res) => (res.ok ? res.json() : { gauges: [] }))
-      .then((data: { gauges: UsgsGauge[] }) => {
-        if (!cancelled) setUsgs(data.gauges ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setUsgs([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [layers.usgs, usgs]);
 
   return (
     <MapContainer
@@ -320,45 +327,30 @@ export default function FloodMap({
       maxZoom={MAX_ZOOM}
       maxBounds={REGION_BOUNDS}
       maxBoundsViscosity={1}
+      // One canvas for the gauge dots, roads and mask instead of hundreds of
+      // SVG nodes: the difference between smooth and stuttering on old phones.
+      preferCanvas
       scrollWheelZoom
       className="h-full w-full"
       zoomControl={false}
     >
       {layers.satellite ? (
         <TileLayer
-          attribution='&copy; <a href="https://www.esri.com/">Esri</a> — Source: Esri, Maxar, Earthstar Geographics'
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          attribution={BASEMAP.satelliteAttribution}
+          url={BASEMAP.satellite}
         />
       ) : (
         <>
-          <TileLayer key={tileBase} attribution={ESRI_ATTRIBUTION} url={tileBase} maxNativeZoom={CANVAS_NATIVE_ZOOM} />
-          <TileLayer key={tileLabels} url={tileLabels} maxNativeZoom={CANVAS_NATIVE_ZOOM} />
+          <TileLayer key={tileBase} className="tiles-base" attribution={BASEMAP.attribution} url={tileBase} maxNativeZoom={CANVAS_NATIVE_ZOOM} />
+          <Pane name="labels" style={{ zIndex: 250 }} className="leaflet-labels-pane">
+            <TileLayer key={tileLabels} pane="labels" url={tileLabels} maxNativeZoom={CANVAS_NATIVE_ZOOM} />
+          </Pane>
         </>
       )}
 
-      {/* Statewide USGS context gauges — small, neutral, non-tiered. */}
-      {layers.usgs &&
-        usgs?.map((g) => (
-          <CircleMarker
-            key={`usgs-${g.id}`}
-            center={[g.lat, g.lng]}
-            radius={3}
-            pathOptions={{
-              color: usgsColor,
-              weight: 1,
-              fillColor: usgsColor,
-              fillOpacity: 0.55,
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -4]}>
-              USGS · {g.name} · {g.levelFt.toFixed(1)} ft
-            </Tooltip>
-          </CircleMarker>
-        ))}
-
       {/* Ripple pulses under the dots — the "tsunami" layer. */}
       {layers.ripples &&
-        gauges.map((g) => {
+        rippling.map((g) => {
           const icon = rippleIcons.get(g.id);
           if (!icon) return null;
           return (
@@ -382,7 +374,7 @@ export default function FloodMap({
               pathOptions={{
                 color: isSel ? selectedStroke : strokeColor,
                 weight: isSel ? 2.5 : 1.5,
-                fillColor: TIER_COLOR[g.tier],
+                fillColor: tierHex[g.tier],
                 fillOpacity: 0.9,
               }}
               eventHandlers={{
@@ -391,7 +383,7 @@ export default function FloodMap({
               }}
             >
               <Tooltip direction="top" offset={[0, -4]}>
-                Gauge {g.id} · {g.tier}
+                {g.name} · {t(`tier.${g.tier}`)}
               </Tooltip>
             </CircleMarker>
           );
@@ -406,29 +398,66 @@ export default function FloodMap({
           }}
         >
           <Tooltip direction="top" offset={[0, -30]}>
-            {address ?? 'Your address'}
+            {address ?? yourAddress}
           </Tooltip>
         </Marker>
       )}
 
+      {layers.roads &&
+        overlays.roads?.features.map((f, i) => (
+          <Polyline
+            key={`road-${i}`}
+            positions={f.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color: tierHex.HIGH, weight: 5, dashArray: '8 6', lineCap: 'butt' }}
+          >
+            <Tooltip direction="top" sticky>
+              {f.properties.name} · {t(f.properties.status === 'closed' ? 'road.closed' : 'road.flooded')}
+            </Tooltip>
+          </Polyline>
+        ))}
+
+      {layers.shelters &&
+        overlays.shelters?.map((s) => (
+          <Marker key={`shelter-${s.id}`} position={[s.lat, s.lng]} icon={shelterIcons[s.status]}>
+            <Tooltip direction="top" offset={[0, -12]}>
+              {s.name} · {t(`shelter.status.${s.status}`)}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {layers.reservoirs &&
+        RESERVOIR_POINTS.map((p) => {
+          const r = overlays.reservoirs?.find((x) => x.name === p.name);
+          return (
+            <Marker key={`res-${p.name}`} position={[p.lat, p.lng]} icon={reservoirIcons.get(p.name)!}>
+              <Tooltip direction="top" offset={[0, -12]}>
+                {t('res.name', { name: p.name })}
+                {r ? ` · ${r.poolElevationFt.toFixed(1)} ft` : ''}
+              </Tooltip>
+            </Marker>
+          );
+        })}
+
+      {layers.reports &&
+        overlays.reports?.map((r, i) => (
+          <Marker key={r.id ?? `report-${i}`} position={[r.lat, r.lng]} icon={reportIcon}>
+            <Tooltip direction="top" offset={[0, -24]}>
+              {t(`report.${r.severity}`)}
+              {r.note ? ` · ${r.note}` : ''}
+            </Tooltip>
+          </Marker>
+        ))}
+
       {layers.wind && <WindLayer color={windColor} />}
 
-      {/* Above the tiles, below the gauges: paper over everything outside Texas. */}
-      <Pane name="not-texas" style={{ zIndex: 350 }}>
-        <TexasMask fill={maskColor} />
-        <Polygon
-          positions={TEXAS_LINES}
-          interactive={false}
-          pathOptions={{ color: borderColor, weight: 1.2, fill: false }}
-        />
-      </Pane>
-
-      <ClampToRegion fitOnStart={!initialView && !(zoomToCenter && center)} />
-      <ReadyProbe onReady={onReady} />
+      <ClampToRegion fitOnStart={!(zoomToCenter && center)} />
+      <MapHandle onMap={onMap} />
+      <LabelFade />
       <FocusGauge gauge={focusGauge} />
       <Recenter
         center={center ? [center.lat, center.lng] : null}
         zoomToCenter={zoomToCenter}
+        inset={inset}
       />
     </MapContainer>
   );

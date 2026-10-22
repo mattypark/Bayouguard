@@ -5,32 +5,32 @@
  * ranking and the reason for it read in one glance. Tap a row to fly there. */
 
 import type { GaugePoint } from '@/lib/types';
-import { TIER_COLOR, TIER_LABEL } from '@/lib/theme';
+import { TIER_COLOR, TIER_INK } from '@/lib/theme';
+import { useI18n } from '@/lib/i18n';
 
 const ROWS = 7;
 
 export default function RiskBoard({
   gauges,
-  sample,
   onPick,
 }: {
   gauges: GaugePoint[];
-  sample: boolean;
   onPick: (g: GaugePoint) => void;
 }) {
+  const { t, num } = useI18n();
   const ranked = [...gauges].sort((a, b) => a.buffer - b.buffer).slice(0, ROWS);
 
   return (
-    <section className="ob-panel ob-float w-[320px] rounded-2xl p-4" data-tour="board" aria-labelledby="risk-board-title">
+    <section className="ob-panel ob-float w-[320px] rounded-xl p-4" aria-labelledby="risk-board-title">
       <div className="flex items-baseline justify-between">
-        <h2 id="risk-board-title" className="text-[15px] font-semibold tracking-[-0.01em]">
-          Closest to flooding
+        <h2 id="risk-board-title" className="text-[0.9375rem] font-semibold tracking-[-0.01em]">
+          {t('board.title')}
         </h2>
-        <span className="text-[11px] text-ob-faint">{sample ? 'sample' : 'live'} · ft to flood stage</span>
+        <span className="text-[0.75rem] text-ob-muted">{t('board.unit')}</span>
       </div>
 
       {ranked.length === 0 ? (
-        <p className="mt-3 text-[13px] text-ob-muted">No gauges match the filters.</p>
+        <p className="mt-3 text-[0.8125rem] text-ob-muted">{t('board.empty')}</p>
       ) : (
         <ol className="mt-3 flex flex-col">
           {ranked.map((g, i) => {
@@ -41,19 +41,18 @@ export default function RiskBoard({
                 <button
                   type="button"
                   onClick={() => onPick(g)}
-                  className="group -mx-2 flex w-[calc(100%+16px)] flex-col gap-1.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-ob-bg2"
-                  aria-label={`Gauge ${g.id}, ${TIER_LABEL[g.tier]} risk, ${g.buffer.toFixed(1)} feet to flood stage`}
+                  className="group -mx-2 flex min-h-[48px] w-[calc(100%+16px)] flex-col gap-1.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-ob-bg"
+                  aria-label={t('board.rowLabel', { name: g.name, tier: t(`tier.${g.tier}`), ft: num(g.buffer, 1) })}
                 >
-                  <span className="flex items-center gap-2 text-[13px]">
-                    <span className="w-4 font-mono text-[11px] text-ob-faint tabular">{i + 1}</span>
+                  <span className="flex items-center gap-2 text-[0.8125rem]">
+                    <span className="w-4 font-mono text-[0.75rem] text-ob-muted tabular">{i + 1}</span>
                     <span className="h-2 w-2 rounded-[3px]" style={{ backgroundColor: TIER_COLOR[g.tier] }} />
-                    <span className="truncate font-medium">Gauge {g.id}</span>
-                    {g.county && <span className="truncate text-[11px] text-ob-faint">{g.county}</span>}
+                    <span className="truncate font-medium" title={g.name}>{g.name}</span>
                     <span
-                      className="ml-auto font-mono text-[12px] font-semibold tabular"
-                      style={{ color: over || g.tier !== 'LOW' ? TIER_COLOR[g.tier] : undefined }}
+                      className="ml-auto font-mono text-[0.75rem] font-semibold tabular"
+                      style={{ color: over || g.tier !== 'LOW' ? TIER_INK[g.tier] : undefined }}
                     >
-                      {over ? `+${Math.abs(g.buffer).toFixed(1)} over` : g.buffer.toFixed(1)}
+                      {over ? t('board.over', { ft: num(Math.abs(g.buffer), 1) }) : num(g.buffer, 1)}
                     </span>
                   </span>
                   <span className="ml-6 block h-1.5 overflow-hidden rounded-full bg-ob-bg2">
